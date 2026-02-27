@@ -17,7 +17,7 @@ accessibility, minimize waiting time, and modernize the current manual reservati
 
 ## Release Notes
 
-## DW.010.001 Release Notes (reverse chronological order)
+## DW.010.001 Release Notes
 - Initialize GitHub repository structure
 - Add initial README and project documentation scaffold
 - NOTES: No known issues reported for this release (update if you have any)
@@ -33,3 +33,8 @@ accessibility, minimize waiting time, and modernize the current manual reservati
 ## Important Links
 - Design Specs: To be added in next release
 - Repository: https://github.com/PiedraverdeAllysonJhen/diwata
+
+## Maintainers
+DIWATA Development Team  
+Bachelor of Science in Computer Science  
+Visayas State University
