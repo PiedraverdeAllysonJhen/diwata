@@ -519,6 +519,18 @@ input {
   padding: 0;
 }
 
+.auth-links {
+  margin-top: 0.58rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.7rem;
+}
+
+.link-muted {
+  opacity: 0.78;
+  text-decoration-thickness: 1px;
+}
+
 .status {
   min-height: 1.2rem;
   margin: 0.7rem 0 0;
@@ -878,3 +890,4 @@ input {
     transform: translateY(-8px) rotate(3deg);
   }
 }
+

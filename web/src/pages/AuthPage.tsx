@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { hasSupabaseEnv, supabase } from "../lib/supabase";
+import { authRedirectBase, hasSupabaseEnv, supabase } from "../lib/supabase";
 
 type AuthMode = "login" | "signup";
 type NoticeType = "idle" | "success" | "error";
@@ -55,6 +55,9 @@ export default function AuthPage() {
   const [noticeType, setNoticeType] = useState<NoticeType>("idle");
   const [errors, setErrors] = useState<FieldErrors>({});
   const [submittedOnce, setSubmittedOnce] = useState(false);
+
+  const dashboardRedirect = `${authRedirectBase}/dashboard`;
+  const resetPasswordRedirect = `${authRedirectBase}/reset-password`;
 
   const passwordScore = useMemo(() => getPasswordScore(password), [password]);
 
@@ -163,11 +166,19 @@ export default function AuthPage() {
         email: email.trim(),
         password,
         options: {
-          emailRedirectTo: `${window.location.origin}/dashboard`
+          emailRedirectTo: dashboardRedirect
         }
       });
 
       if (error) throw error;
+
+      const isExistingAccountAttempt =
+        Array.isArray(data.user?.identities) && data.user?.identities.length === 0;
+
+      if (isExistingAccountAttempt) {
+        setFeedback("This email is already registered. Use Forgot password to recover access.", "error");
+        return;
+      }
 
       if (data.session) {
         setFeedback("Account created. Redirecting...", "success");
@@ -176,7 +187,15 @@ export default function AuthPage() {
         setFeedback("Account created. Check your email to confirm your account.", "success");
       }
     } catch (error) {
-      setFeedback(getFriendlyError(error), "error");
+      const message = getFriendlyError(error);
+      if (mode === "login" && /invalid login credentials/i.test(message)) {
+        setFeedback(
+          "Invalid credentials or email not yet confirmed. Verify your email, then try again or use Forgot password.",
+          "error"
+        );
+      } else {
+        setFeedback(message, "error");
+      }
     } finally {
       setIsLoading(false);
     }
@@ -207,7 +226,7 @@ export default function AuthPage() {
       const { error } = await supabase.auth.signInWithOtp({
         email: trimmedEmail,
         options: {
-          emailRedirectTo: `${window.location.origin}/dashboard`
+          emailRedirectTo: dashboardRedirect
         }
       });
 
@@ -243,11 +262,50 @@ export default function AuthPage() {
 
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(trimmedEmail, {
-        redirectTo: `${window.location.origin}/reset-password`
+        redirectTo: resetPasswordRedirect
       });
 
       if (error) throw error;
       setFeedback("Password reset link sent to your email.", "success");
+    } catch (error) {
+      setFeedback(getFriendlyError(error), "error");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleResendConfirmation = async () => {
+    if (!hasSupabaseEnv) {
+      setFeedback("Supabase environment variables are not configured.", "error");
+      return;
+    }
+
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail) {
+      setFieldError("email", "Please fill all fields.");
+      setFeedback("Enter your email first to resend confirmation.", "error");
+      return;
+    }
+
+    if (!isValidEmail(trimmedEmail)) {
+      setFieldError("email", "Please enter a valid email address.");
+      setFeedback("Please enter a valid email address.", "error");
+      return;
+    }
+
+    setIsLoading(true);
+
+    try {
+      const { error } = await supabase.auth.resend({
+        type: "signup",
+        email: trimmedEmail,
+        options: {
+          emailRedirectTo: dashboardRedirect
+        }
+      });
+
+      if (error) throw error;
+      setFeedback("Confirmation email resent. Check inbox and spam folder.", "success");
     } catch (error) {
       setFeedback(getFriendlyError(error), "error");
     } finally {
@@ -453,14 +511,24 @@ export default function AuthPage() {
                 </button>
               </div>
 
-              <button
-                type="button"
-                className="btn btn-link"
-                onClick={handleForgotPassword}
-                disabled={isLoading}
-              >
-                Forgot password?
-              </button>
+              <div className="auth-links">
+                <button
+                  type="button"
+                  className="btn btn-link"
+                  onClick={handleForgotPassword}
+                  disabled={isLoading}
+                >
+                  Forgot password?
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-link link-muted"
+                  onClick={handleResendConfirmation}
+                  disabled={isLoading}
+                >
+                  Resend confirmation email
+                </button>
+              </div>
 
               <p className={`status ${noticeType}`}>{notice}</p>
             </form>
