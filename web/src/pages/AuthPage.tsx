@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { authRedirectBase, hasSupabaseEnv, supabase } from "../lib/supabase";
 
 type AuthMode = "login" | "signup";
+type BookState = "closed" | "opening" | "open";
 type NoticeType = "idle" | "success" | "error";
 type FieldKey = "email" | "password" | "confirmPassword";
 type FieldErrors = Partial<Record<FieldKey, string>>;
@@ -77,6 +78,7 @@ export default function AuthPage() {
   const [noticeType, setNoticeType] = useState<NoticeType>("idle");
   const [errors, setErrors] = useState<FieldErrors>({});
   const [submittedOnce, setSubmittedOnce] = useState(false);
+  const [bookState, setBookState] = useState<BookState>("closed");
 
   const dashboardRedirect = `${authRedirectBase}/dashboard`;
   const resetPasswordRedirect = `${authRedirectBase}/reset-password`;
@@ -178,6 +180,26 @@ export default function AuthPage() {
       setFieldError("confirmPassword");
     }
   }, [mode]);
+  useEffect(() => {
+    if (bookState !== "opening") {
+      return;
+    }
+
+    const openTimer = window.setTimeout(() => {
+      setBookState("open");
+    }, 860);
+
+    return () => {
+      window.clearTimeout(openTimer);
+    };
+  }, [bookState]);
+
+  const handleOpenBook = () => {
+    if (bookState !== "closed") {
+      return;
+    }
+    setBookState("opening");
+  };
 
   const setFeedback = (message: string, type: NoticeType) => {
     setNotice(message);
@@ -387,7 +409,44 @@ export default function AuthPage() {
         ))}
       </ul>
 
-      <section className="auth-shell">
+      <section className={"book-stage " + bookState}>
+        <button
+          type="button"
+          className="book-cover"
+          onClick={handleOpenBook}
+          aria-label="Open the book cover to continue to Login or Sign Up"
+          disabled={bookState !== "closed"}
+        >
+          <div className="book-cover-inner">
+            <header className="cover-header">
+              <img
+                src="/assets/bookitstudent-logo.jpg"
+                alt="BookItStudent cover logo"
+                className="cover-logo"
+              />
+              <span className="cover-divider" aria-hidden="true" />
+              <div className="cover-heading">
+                <h2 className="cover-title">BookItStudent</h2>
+                <p className="cover-university">Visayas State University</p>
+              </div>
+            </header>
+
+            <div className="cover-copy">
+              <p className="cover-welcome">Welcome to BookItStudent</p>
+              <p className="cover-description">
+                A student-ready library portal for engineering, language, science, technology, and
+                agriculture collections.
+              </p>
+            </div>
+
+            <footer className="cover-footer">
+              <p className="cover-reminder">Click or press this cover to open Login/Sign Up.</p>
+              <span className="cover-edition">BookItStudent 2026 | Enera Ltd.</span>
+            </footer>
+          </div>
+        </button>
+
+        <section className="auth-shell">
         <aside className="brand-pane">
           <header className="brand-header">
             <img
@@ -613,6 +672,7 @@ export default function AuthPage() {
             </form>
           </div>
         </section>
+      </section>
       </section>
     </main>
   );
