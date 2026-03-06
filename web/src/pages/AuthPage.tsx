@@ -42,6 +42,28 @@ function getFriendlyError(error: unknown): string {
   return "Something went wrong. Please try again.";
 }
 
+function getLoginErrorMessage(error: unknown): string {
+  const fallback = getFriendlyError(error);
+  const message = fallback.toLowerCase();
+  const code =
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    typeof (error as { code?: unknown }).code === "string"
+      ? ((error as { code?: string }).code ?? "").toLowerCase()
+      : "";
+
+  if (code === "email_not_confirmed" || /email\s+(address\s+)?not\s+confirmed/i.test(message)) {
+    return "Email not confirmed. Please verify your email before logging in.";
+  }
+
+  if (code === "invalid_credentials" || /invalid login credentials/i.test(message)) {
+    return "Invalid email or password. Please try again or use Forgot password.";
+  }
+
+  return fallback;
+}
+
 export default function AuthPage() {
   const navigate = useNavigate();
 
@@ -60,6 +82,36 @@ export default function AuthPage() {
   const resetPasswordRedirect = `${authRedirectBase}/reset-password`;
 
   const passwordScore = useMemo(() => getPasswordScore(password), [password]);
+  const renderVisibilityIcon = (isVisible: boolean) =>
+    isVisible ? (
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path
+          d="M3 3L21 21M10.58 10.58a2 2 0 102.83 2.83"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <path
+          d="M9.88 5.09A10.94 10.94 0 0112 5c5 0 9.27 3.11 11 7.5a11.81 11.81 0 01-4.21 5.29M6.61 6.61A11.84 11.84 0 001 12.5 11.82 11.82 0 004.13 16"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    ) : (
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path
+          d="M1 12.5C2.73 8.11 7 5 12 5s9.27 3.11 11 7.5c-1.73 4.39-6 7.5-11 7.5s-9.27-3.11-11-7.5z"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <circle cx="12" cy="12.5" r="3" stroke="currentColor" strokeWidth="2" />
+      </svg>
+    );
 
   const validateFields = (
     values: { email: string; password: string; confirmPassword: string } = { email, password, confirmPassword }
@@ -187,14 +239,10 @@ export default function AuthPage() {
         setFeedback("Account created. Check your email to confirm your account.", "success");
       }
     } catch (error) {
-      const message = getFriendlyError(error);
-      if (mode === "login" && /invalid login credentials/i.test(message)) {
-        setFeedback(
-          "Invalid credentials or email not yet confirmed. Verify your email, then try again or use Forgot password.",
-          "error"
-        );
+      if (mode === "login") {
+        setFeedback(getLoginErrorMessage(error), "error");
       } else {
-        setFeedback(message, "error");
+        setFeedback(getFriendlyError(error), "error");
       }
     } finally {
       setIsLoading(false);
@@ -233,7 +281,11 @@ export default function AuthPage() {
       if (error) throw error;
       setFeedback("Magic link sent. Open your email to continue.", "success");
     } catch (error) {
-      setFeedback(getFriendlyError(error), "error");
+      if (mode === "login") {
+        setFeedback(getLoginErrorMessage(error), "error");
+      } else {
+        setFeedback(getFriendlyError(error), "error");
+      }
     } finally {
       setIsLoading(false);
     }
@@ -268,7 +320,11 @@ export default function AuthPage() {
       if (error) throw error;
       setFeedback("Password reset link sent to your email.", "success");
     } catch (error) {
-      setFeedback(getFriendlyError(error), "error");
+      if (mode === "login") {
+        setFeedback(getLoginErrorMessage(error), "error");
+      } else {
+        setFeedback(getFriendlyError(error), "error");
+      }
     } finally {
       setIsLoading(false);
     }
@@ -307,7 +363,11 @@ export default function AuthPage() {
       if (error) throw error;
       setFeedback("Confirmation email resent. Check inbox and spam folder.", "success");
     } catch (error) {
-      setFeedback(getFriendlyError(error), "error");
+      if (mode === "login") {
+        setFeedback(getLoginErrorMessage(error), "error");
+      } else {
+        setFeedback(getFriendlyError(error), "error");
+      }
     } finally {
       setIsLoading(false);
     }
@@ -422,38 +482,41 @@ export default function AuthPage() {
 
               <label htmlFor="password">Password</label>
               <div className="password-row">
-                <input
-                  id="password"
-                  type={showPassword ? "text" : "password"}
-                  autoComplete={mode === "login" ? "current-password" : "new-password"}
-                  value={password}
-                  aria-invalid={Boolean(errors.password)}
-                  className={errors.password ? "field-error" : ""}
-                  onBlur={() => setFieldError("password", validateFields().password)}
-                  onChange={(event) => {
-                    const nextPassword = event.target.value;
-                    setPassword(nextPassword);
-                    if (submittedOnce || errors.password || errors.confirmPassword) {
-                      const nextErrors = validateFields({
-                        email,
-                        password: nextPassword,
-                        confirmPassword
-                      });
-                      setFieldError("password", nextErrors.password);
-                      if (mode === "signup") {
-                        setFieldError("confirmPassword", nextErrors.confirmPassword);
+                <div className="password-field">
+                  <input
+                    id="password"
+                    type={showPassword ? "text" : "password"}
+                    autoComplete={mode === "login" ? "current-password" : "new-password"}
+                    value={password}
+                    aria-invalid={Boolean(errors.password)}
+                    className={errors.password ? "field-error" : ""}
+                    onBlur={() => setFieldError("password", validateFields().password)}
+                    onChange={(event) => {
+                      const nextPassword = event.target.value;
+                      setPassword(nextPassword);
+                      if (submittedOnce || errors.password || errors.confirmPassword) {
+                        const nextErrors = validateFields({
+                          email,
+                          password: nextPassword,
+                          confirmPassword
+                        });
+                        setFieldError("password", nextErrors.password);
+                        if (mode === "signup") {
+                          setFieldError("confirmPassword", nextErrors.confirmPassword);
+                        }
                       }
-                    }
-                  }}
-                  placeholder="Enter your password"
-                />
-                <button
-                  type="button"
-                  className="password-toggle"
-                  onClick={() => setShowPassword((value) => !value)}
-                >
-                  {showPassword ? "Hide" : "Show"}
-                </button>
+                    }}
+                    placeholder="Enter your password"
+                  />
+                  <button
+                    type="button"
+                    className="password-visibility"
+                    aria-label={showPassword ? "Hide password" : "Show password"}
+                    onClick={() => setShowPassword((value) => !value)}
+                  >
+                    {renderVisibilityIcon(showPassword)}
+                  </button>
+                </div>
               </div>
               <p className={`field-feedback ${errors.password ? "show" : ""}`}>
                 {errors.password ?? "\u00a0"}
@@ -462,27 +525,39 @@ export default function AuthPage() {
               {mode === "signup" && (
                 <>
                   <label htmlFor="confirm-password">Confirm password</label>
-                  <input
-                    id="confirm-password"
-                    type={showPassword ? "text" : "password"}
-                    autoComplete="new-password"
-                    value={confirmPassword}
-                    aria-invalid={Boolean(errors.confirmPassword)}
-                    className={errors.confirmPassword ? "field-error" : ""}
-                    onBlur={() => setFieldError("confirmPassword", validateFields().confirmPassword)}
-                    onChange={(event) => {
-                      const nextConfirm = event.target.value;
-                      setConfirmPassword(nextConfirm);
-                      if (submittedOnce || errors.confirmPassword) {
-                        setFieldError(
-                          "confirmPassword",
-                          validateFields({ email, password, confirmPassword: nextConfirm })
-                            .confirmPassword
-                        );
-                      }
-                    }}
-                    placeholder="Confirm your password"
-                  />
+                  <div className="password-row">
+                    <div className="password-field">
+                      <input
+                        id="confirm-password"
+                        type={showPassword ? "text" : "password"}
+                        autoComplete="new-password"
+                        value={confirmPassword}
+                        aria-invalid={Boolean(errors.confirmPassword)}
+                        className={errors.confirmPassword ? "field-error" : ""}
+                        onBlur={() => setFieldError("confirmPassword", validateFields().confirmPassword)}
+                        onChange={(event) => {
+                          const nextConfirm = event.target.value;
+                          setConfirmPassword(nextConfirm);
+                          if (submittedOnce || errors.confirmPassword) {
+                            setFieldError(
+                              "confirmPassword",
+                              validateFields({ email, password, confirmPassword: nextConfirm })
+                                .confirmPassword
+                            );
+                          }
+                        }}
+                        placeholder="Confirm your password"
+                      />
+                      <button
+                        type="button"
+                        className="password-visibility"
+                        aria-label={showPassword ? "Hide password" : "Show password"}
+                        onClick={() => setShowPassword((value) => !value)}
+                      >
+                        {renderVisibilityIcon(showPassword)}
+                      </button>
+                    </div>
+                  </div>
                   <p className={`field-feedback ${errors.confirmPassword ? "show" : ""}`}>
                     {errors.confirmPassword ?? "\u00a0"}
                   </p>
@@ -512,22 +587,26 @@ export default function AuthPage() {
               </div>
 
               <div className="auth-links">
-                <button
-                  type="button"
-                  className="btn btn-link"
-                  onClick={handleForgotPassword}
-                  disabled={isLoading}
-                >
-                  Forgot password?
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-link link-muted"
-                  onClick={handleResendConfirmation}
-                  disabled={isLoading}
-                >
-                  Resend confirmation email
-                </button>
+                {mode === "login" && (
+                  <button
+                    type="button"
+                    className="btn btn-link"
+                    onClick={handleForgotPassword}
+                    disabled={isLoading}
+                  >
+                    Forgot password?
+                  </button>
+                )}
+                {mode === "signup" && (
+                  <button
+                    type="button"
+                    className="btn btn-link link-muted"
+                    onClick={handleResendConfirmation}
+                    disabled={isLoading}
+                  >
+                    Resend confirmation email
+                  </button>
+                )}
               </div>
 
               <p className={`status ${noticeType}`}>{notice}</p>
@@ -538,3 +617,4 @@ export default function AuthPage() {
     </main>
   );
 }
+

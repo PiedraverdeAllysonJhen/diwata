@@ -406,19 +406,45 @@ input {
 }
 
 .password-row {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 0.42rem;
+  width: 100%;
 }
 
-.password-toggle {
+.password-field {
+  position: relative;
+}
+
+.password-field input {
+  padding-right: 2.8rem;
+}
+
+.password-visibility {
+  position: absolute;
+  right: 0.46rem;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 2.1rem;
+  height: 2.1rem;
   border: none;
-  border-radius: 10px;
-  background: #ecfaef;
-  color: var(--forest-800);
-  min-width: 72px;
-  font-weight: 700;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--forest-700);
+  display: grid;
+  place-items: center;
   cursor: pointer;
+}
+
+.password-visibility svg {
+  width: 1.1rem;
+  height: 1.1rem;
+}
+
+.password-visibility:hover:not(:disabled) {
+  background: rgba(26, 122, 94, 0.1);
+}
+
+.password-visibility:focus-visible {
+  outline: 2px solid rgba(26, 122, 94, 0.35);
+  outline-offset: 1px;
 }
 
 .password-meter {
@@ -577,6 +603,10 @@ input {
   line-height: 1.55;
 }
 
+.reset-form .btn-primary {
+  margin-top: 0.8rem;
+}
+
 .dashboard-grid {
   margin: 1rem 0 1.1rem;
   display: grid;
@@ -730,10 +760,6 @@ input {
     display: none;
   }
 
-  .password-row {
-    grid-template-columns: 1fr 68px;
-  }
-
   .btn {
     padding: 0.68rem 0.86rem;
   }
@@ -785,14 +811,10 @@ input {
     padding: 0.62rem 0.7rem;
   }
 
-  .password-row {
-    grid-template-columns: 1fr 62px;
+  .password-visibility {
+    width: 1.9rem;
+    height: 1.9rem;
   }
-
-  .password-toggle {
-    min-width: 62px;
-  }
-
   .btn {
     font-size: 0.9rem;
   }

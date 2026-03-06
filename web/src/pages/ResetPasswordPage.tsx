@@ -101,7 +101,7 @@ export default function ResetPasswordPage() {
         <p>Use a strong password with letters, numbers, and symbols.</p>
 
         {isReady && (
-          <form className="auth-form" onSubmit={handleSubmit}>
+          <form className="auth-form reset-form" onSubmit={handleSubmit}>
             <label htmlFor="reset-password">New password</label>
             <input
               id="reset-password"
@@ -133,3 +133,4 @@ export default function ResetPasswordPage() {
     </main>
   );
 }
+
