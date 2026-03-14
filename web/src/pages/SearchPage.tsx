@@ -5,6 +5,13 @@ import { hasSupabaseEnv, supabase } from "../lib/supabase";
 import PortalLiveIndicator from "../components/PortalLiveIndicator";
 import LibraryWorkspaceLayout from "../components/LibraryWorkspaceLayout";
 import { useReservationNotifier } from "../hooks/useReservationNotifier";
+import {
+  RawAuthorRelation,
+  formatAuthorLine,
+  formatPublicationLabel,
+  normalizeAuthors,
+  normalizeTags
+} from "../lib/bookMetadata";
 
 type RawCategoryRelation = {
   category_id: string;
@@ -13,32 +20,38 @@ type RawCategoryRelation = {
 
 type RawBookRecord = {
   id: string;
+  isbn: string | null;
   title: string;
   subtitle: string | null;
   description: string | null;
   publisher: string | null;
   language: string | null;
   publication_year: number | null;
+  publication_date: string | null;
   cover_image_url: string | null;
   available_copies: number;
   total_copies: number;
   tags: string[] | null;
   book_categories: RawCategoryRelation[] | null;
+  book_authors: RawAuthorRelation[] | null;
 };
 
 type SearchBook = {
   id: string;
+  isbn: string | null;
   title: string;
   subtitle: string | null;
   description: string | null;
   publisher: string | null;
   language: string | null;
   publicationYear: number | null;
+  publicationDate: string | null;
   coverImageUrl: string | null;
   availableCopies: number;
   totalCopies: number;
   tags: string[];
   categories: string[];
+  authors: string[];
 };
 
 type CategoryRow = {
@@ -81,17 +94,20 @@ function normalizeCategories(relations: RawCategoryRelation[] | null): string[] 
 function normalizeBook(record: RawBookRecord): SearchBook {
   return {
     id: record.id,
+    isbn: record.isbn,
     title: record.title,
     subtitle: record.subtitle,
     description: record.description,
     publisher: record.publisher,
     language: record.language,
     publicationYear: record.publication_year,
+    publicationDate: record.publication_date,
     coverImageUrl: record.cover_image_url,
     availableCopies: record.available_copies,
     totalCopies: record.total_copies,
-    tags: record.tags ?? [],
-    categories: normalizeCategories(record.book_categories)
+    tags: normalizeTags(record.tags),
+    categories: normalizeCategories(record.book_categories),
+    authors: normalizeAuthors(record.book_authors)
   };
 }
 
@@ -210,7 +226,7 @@ export default function SearchPage() {
       supabase
         .from("books")
         .select(
-          "id,title,subtitle,description,publisher,language,publication_year,cover_image_url,available_copies,total_copies,tags,book_categories(category_id,categories(id,name))"
+          "id,isbn,title,subtitle,description,publisher,language,publication_year,publication_date,cover_image_url,available_copies,total_copies,tags,book_categories(category_id,categories(id,name)),book_authors(author_id,authors(id,name))"
         )
         .order("title", { ascending: true })
         .limit(300),
@@ -271,26 +287,12 @@ export default function SearchPage() {
 
     const channel = supabase
       .channel(`search-realtime-${session.user.id}`)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "books" },
-        queueLiveRefresh
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "book_copies" },
-        queueLiveRefresh
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "book_categories" },
-        queueLiveRefresh
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "categories" },
-        queueLiveRefresh
-      )
+      .on("postgres_changes", { event: "*", schema: "public", table: "books" }, queueLiveRefresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "book_copies" }, queueLiveRefresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "book_categories" }, queueLiveRefresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "book_authors" }, queueLiveRefresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "categories" }, queueLiveRefresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "authors" }, queueLiveRefresh)
       .subscribe();
 
     return () => {
@@ -322,8 +324,7 @@ export default function SearchPage() {
 
     return books.filter((book) => {
       const bookAvailability = getAvailabilityState(book);
-      const matchesCategory =
-        selectedCategory === "all" || book.categories.includes(selectedCategory);
+      const matchesCategory = selectedCategory === "all" || book.categories.includes(selectedCategory);
 
       if (!matchesCategory) return false;
       if (selectedLanguage !== "all" && book.language !== selectedLanguage) return false;
@@ -337,9 +338,12 @@ export default function SearchPage() {
         book.description ?? "",
         book.publisher ?? "",
         book.language ?? "",
+        book.publicationDate ?? "",
         book.publicationYear ? String(book.publicationYear) : "",
+        book.isbn ?? "",
         book.tags.join(" "),
-        book.categories.join(" ")
+        book.categories.join(" "),
+        book.authors.join(" ")
       ];
 
       return searchableValues.some((value) => value.toLowerCase().includes(keyword));
@@ -375,35 +379,13 @@ export default function SearchPage() {
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [books, categories]);
 
-  const categoryPreviewBook = useMemo(() => {
-    const previews = new Map<string, SearchBook>();
-
-    for (const book of books) {
-      for (const category of book.categories) {
-        if (!previews.has(category)) {
-          previews.set(category, book);
-        }
-      }
-    }
-
-    return previews;
-  }, [books]);
-
   const featuredBooks = useMemo(() => {
     return [...filteredBooks]
       .sort((a, b) => {
         const availabilityRankA =
-          getAvailabilityState(a) === "available"
-            ? 2
-            : getAvailabilityState(a) === "low_stock"
-              ? 1
-              : 0;
+          getAvailabilityState(a) === "available" ? 2 : getAvailabilityState(a) === "low_stock" ? 1 : 0;
         const availabilityRankB =
-          getAvailabilityState(b) === "available"
-            ? 2
-            : getAvailabilityState(b) === "low_stock"
-              ? 1
-              : 0;
+          getAvailabilityState(b) === "available" ? 2 : getAvailabilityState(b) === "low_stock" ? 1 : 0;
 
         if (availabilityRankA !== availabilityRankB) {
           return availabilityRankB - availabilityRankA;
@@ -417,11 +399,6 @@ export default function SearchPage() {
       })
       .slice(0, 8);
   }, [filteredBooks]);
-
-  const availableNowCount = useMemo(
-    () => books.filter((book) => getAvailabilityState(book) !== "out_of_stock").length,
-    [books]
-  );
 
   const hasFilters =
     searchQuery.trim().length > 0 ||
@@ -544,7 +521,7 @@ export default function SearchPage() {
                 setSearchQuery("");
               }
             }}
-            placeholder="Find title, description, publisher, tags, or year"
+            placeholder="Find title, author, ISBN, tags, or year"
           />
         </label>
 
@@ -593,7 +570,7 @@ export default function SearchPage() {
         </div>
       </section>
 
-            <section className="discover-section" aria-label="Book recommendations">
+      <section className="discover-section" aria-label="Book recommendations">
         <header className="discover-section-head">
           <h2>Book Recommendation</h2>
           <button
@@ -630,6 +607,7 @@ export default function SearchPage() {
 
                   <h3 title={book.title}>{book.title}</h3>
                   <p>{book.subtitle ?? book.publisher ?? "Catalog record"}</p>
+                  <p className="discover-recommend-byline">By {formatAuthorLine(book.authors)}</p>
 
                   <div className="discover-recommend-meta">
                     <span className={`availability-pill ${availability}`}>{getAvailabilityLabel(availability)}</span>
@@ -659,7 +637,6 @@ export default function SearchPage() {
         ) : (
           <div className="discover-category-grid">
             {categoryCounts.map((entry: CategoryCount) => {
-              const previewBook = categoryPreviewBook.get(entry.name);
               const isActive = selectedCategory === entry.name;
 
               return (
@@ -669,20 +646,6 @@ export default function SearchPage() {
                   className={`discover-category-card ${isActive ? "active" : ""}`.trim()}
                   onClick={() => setSelectedCategory(isActive ? "all" : entry.name)}
                 >
-                  <div
-                    className={`discover-mini-cover ${previewBook ? getToneClass(previewBook.id) : "tone-1"} ${previewBook?.coverImageUrl ? "has-image" : ""}`.trim()}
-                    style={
-                      previewBook?.coverImageUrl
-                        ? {
-                            backgroundImage: `linear-gradient(165deg, rgba(7, 66, 52, 0.42), rgba(7, 66, 52, 0.08)), url(${previewBook.coverImageUrl})`
-                          }
-                        : undefined
-                    }
-                  >
-                    {!previewBook?.coverImageUrl ? (
-                      <span>{getBookMonogram(previewBook?.title ?? entry.name)}</span>
-                    ) : null}
-                  </div>
                   <strong>{entry.name}</strong>
                   <span>{entry.count} titles</span>
                 </button>
@@ -692,7 +655,7 @@ export default function SearchPage() {
         )}
       </section>
 
-            {shouldShowResultsSection ? (
+      {shouldShowResultsSection ? (
         <section className="discover-section" aria-label="Search results">
           <header className="discover-section-head">
             <h2>Search Results</h2>
@@ -708,7 +671,7 @@ export default function SearchPage() {
                 return (
                   <article key={book.id} className="discover-result-card">
                     <div
-                      className={`discover-mini-cover ${getToneClass(book.id)} ${book.coverImageUrl ? "has-image" : ""}`.trim()}
+                      className={`discover-result-cover ${getToneClass(book.id)} ${book.coverImageUrl ? "has-image" : ""}`.trim()}
                       style={
                         book.coverImageUrl
                           ? {
@@ -728,15 +691,20 @@ export default function SearchPage() {
                         </span>
                       </div>
 
-                      <p className="discover-result-meta">
-                        {book.availableCopies} of {book.totalCopies} copies available
-                        {book.language ? ` | ${book.language}` : ""}
-                        {book.publicationYear ? ` | ${book.publicationYear}` : ""}
-                      </p>
+                      <div className="discover-book-meta-grid">
+                        <p className="discover-result-meta"><strong>Author:</strong> {formatAuthorLine(book.authors)}</p>
+                        <p className="discover-result-meta"><strong>Publish date:</strong> {formatPublicationLabel(book.publicationDate, book.publicationYear)}</p>
+                        <p className="discover-result-meta"><strong>ISBN:</strong> {book.isbn ?? "N/A"}</p>
+                        <p className="discover-result-meta"><strong>Publisher:</strong> {book.publisher ?? "N/A"}</p>
+                        <p className="discover-result-meta"><strong>Language:</strong> {book.language ?? "N/A"}</p>
+                        <p className="discover-result-meta"><strong>Copies:</strong> {book.availableCopies} available / {book.totalCopies} total</p>
+                        <p className="discover-result-meta"><strong>Subtitle:</strong> {book.subtitle ?? "N/A"}</p>
+                        <p className="discover-result-meta"><strong>Tags:</strong> {book.tags.length > 0 ? book.tags.join(", ") : "None"}</p>
+                      </div>
 
-                      {book.description ? (
-                        <p className="discover-result-description">{book.description}</p>
-                      ) : null}
+                      <p className="discover-result-description">
+                        <strong>Description:</strong> {book.description ?? "No description provided."}
+                      </p>
 
                       {book.categories.length > 0 ? (
                         <div className="search-book-tags">
@@ -755,9 +723,7 @@ export default function SearchPage() {
                           onClick={() => navigate("/reservations")}
                           disabled={availabilityState === "out_of_stock"}
                         >
-                          {availabilityState === "out_of_stock"
-                            ? "Unavailable right now"
-                            : "Reserve from reservations"}
+                          {availabilityState === "out_of_stock" ? "Unavailable right now" : "Reserve from reservations"}
                         </button>
                       </div>
                     </div>
@@ -771,10 +737,5 @@ export default function SearchPage() {
     </LibraryWorkspaceLayout>
   );
 }
-
-
-
-
-
 
 

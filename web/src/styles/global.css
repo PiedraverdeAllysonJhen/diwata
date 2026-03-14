@@ -1433,6 +1433,10 @@ input {
   color: var(--text-muted);
 }
 
+.reservation-workspace-grid {
+  grid-template-columns: 1fr;
+}
+
 .reservation-list {
   list-style: none;
   margin: 0;
@@ -1441,17 +1445,35 @@ input {
   gap: 0.56rem;
 }
 
+.reservation-list-available {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.64rem;
+}
+
+.reservation-list-active {
+  grid-template-columns: 1fr;
+}
+
 .reservation-item {
   border-radius: 12px;
   border: 1px solid rgba(134, 206, 153, 0.82);
   background: #fff;
   padding: 0.62rem;
   display: grid;
-  gap: 0.54rem;
+  grid-template-columns: 92px minmax(0, 1fr) auto;
+  gap: 0.62rem;
+  align-items: start;
+}
+
+.reservation-item .discover-result-cover {
+  align-self: start;
 }
 
 .reservation-item-content {
   min-width: 0;
+  display: grid;
+  gap: 0.14rem;
+  align-content: start;
 }
 
 .reservation-item-head {
@@ -1469,7 +1491,7 @@ input {
 }
 
 .reservation-item-meta {
-  margin: 0.24rem 0 0;
+  margin: 0.16rem 0 0;
   font-size: 0.8rem;
   line-height: 1.35;
   color: var(--text-muted);
@@ -1478,6 +1500,7 @@ input {
 .reservation-item-actions {
   display: flex;
   justify-content: flex-end;
+  align-items: flex-end;
 }
 
 .status-pill {
@@ -1520,6 +1543,10 @@ input {
   .reservation-grid {
     grid-template-columns: 1fr;
   }
+
+  .reservation-list-available {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 680px) {
@@ -1533,8 +1560,16 @@ input {
     flex: 1 1 100%;
   }
 
+  .reservation-item {
+    grid-template-columns: 1fr;
+  }
+
   .reservation-item-head {
     flex-direction: column;
+  }
+
+  .reservation-item-actions {
+    justify-content: flex-start;
   }
 
   .status-pill {
@@ -1919,6 +1954,10 @@ input {
   color: var(--text-muted);
 }
 
+.reservation-workspace-grid {
+  grid-template-columns: 1fr;
+}
+
 .reservation-list {
   list-style: none;
   margin: 0;
@@ -1927,17 +1966,35 @@ input {
   gap: 0.56rem;
 }
 
+.reservation-list-available {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.64rem;
+}
+
+.reservation-list-active {
+  grid-template-columns: 1fr;
+}
+
 .reservation-item {
   border-radius: 12px;
   border: 1px solid rgba(134, 206, 153, 0.82);
   background: #fff;
   padding: 0.62rem;
   display: grid;
-  gap: 0.54rem;
+  grid-template-columns: 92px minmax(0, 1fr) auto;
+  gap: 0.62rem;
+  align-items: start;
+}
+
+.reservation-item .discover-result-cover {
+  align-self: start;
 }
 
 .reservation-item-content {
   min-width: 0;
+  display: grid;
+  gap: 0.14rem;
+  align-content: start;
 }
 
 .reservation-item-head {
@@ -1955,15 +2012,16 @@ input {
 }
 
 .reservation-item-meta {
-  margin: 0.24rem 0 0;
+  margin: 0.16rem 0 0;
   font-size: 0.8rem;
-  line-height: 1.38;
+  line-height: 1.35;
   color: var(--text-muted);
 }
 
 .reservation-item-actions {
   display: flex;
   justify-content: flex-end;
+  align-items: flex-end;
 }
 
 .status-pill {
@@ -2867,7 +2925,8 @@ input {
 }
 
 .discover-book-cover span,
-.discover-mini-cover span {
+.discover-mini-cover span,
+.discover-result-cover span {
   font-family: "Fraunces", Georgia, serif;
   font-size: 1.28rem;
   font-weight: 700;
@@ -2876,32 +2935,38 @@ input {
 }
 
 .discover-book-cover.has-image span,
-.discover-mini-cover.has-image span {
+.discover-mini-cover.has-image span,
+.discover-result-cover.has-image span {
   display: none;
 }
 
 .discover-book-cover.tone-1,
-.discover-mini-cover.tone-1 {
+.discover-mini-cover.tone-1,
+.discover-result-cover.tone-1 {
   background: linear-gradient(150deg, #1f7f62, #0f6d53 54%, #0a5d47);
 }
 
 .discover-book-cover.tone-2,
-.discover-mini-cover.tone-2 {
+.discover-mini-cover.tone-2,
+.discover-result-cover.tone-2 {
   background: linear-gradient(160deg, #2b916e, #1a7559 52%, #0d5c47);
 }
 
 .discover-book-cover.tone-3,
-.discover-mini-cover.tone-3 {
+.discover-mini-cover.tone-3,
+.discover-result-cover.tone-3 {
   background: linear-gradient(155deg, #0f7f60, #2b9f74 56%, #0f654d);
 }
 
 .discover-book-cover.tone-4,
-.discover-mini-cover.tone-4 {
+.discover-mini-cover.tone-4,
+.discover-result-cover.tone-4 {
   background: linear-gradient(145deg, #1c725a, #115944 50%, #0c4737);
 }
 
 .discover-book-cover.tone-5,
-.discover-mini-cover.tone-5 {
+.discover-mini-cover.tone-5,
+.discover-result-cover.tone-5 {
   background: linear-gradient(152deg, #248867, #13684f 52%, #0a5340);
 }
 
@@ -2954,6 +3019,16 @@ input {
   background-position: center;
 }
 
+.discover-result-cover {
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  border-radius: 8px;
+  border: 1px solid rgba(129, 201, 148, 0.8);
+  display: grid;
+  place-items: center;
+  background-size: cover;
+  background-position: center;
+}
 .discover-results-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
@@ -3074,11 +3149,11 @@ input {
     grid-template-columns: 1fr;
   }
 
-  .discover-mini-cover {
-    aspect-ratio: 4 / 3;
+  .discover-mini-cover,
+  .discover-result-cover {
+    width: 100%;
   }
 }
-
 @media (max-width: 520px) {
   .discover-stat-strip {
     grid-template-columns: 1fr;
@@ -3544,22 +3619,25 @@ input {
 .discover-exact .discover-recommend-grid {
   display: grid;
   grid-auto-flow: column;
-  grid-auto-columns: minmax(136px, 150px);
+  grid-auto-columns: 152px;
   overflow-x: auto;
-  gap: 0.58rem;
-  padding-bottom: 0.18rem;
+  gap: 0.68rem;
+  padding-bottom: 0.2rem;
   scrollbar-width: thin;
 }
 
 .discover-exact .discover-recommend-card {
+  width: 152px;
+  min-width: 152px;
   border: none;
   background: transparent;
   padding: 0;
-  gap: 0.36rem;
+  gap: 0.34rem;
+  align-content: start;
 }
 
 .discover-exact .discover-book-cover {
-  aspect-ratio: 0.68;
+  aspect-ratio: 2 / 3;
   border-radius: 8px;
   border: 1px solid rgba(175, 206, 186, 0.68);
   box-shadow: 0 10px 16px rgba(32, 86, 62, 0.15);
@@ -3567,11 +3645,33 @@ input {
 
 .discover-exact .discover-recommend-card h3 {
   font-size: 0.8rem;
-  line-height: 1.3;
+  line-height: 1.28;
+  min-height: 2.05rem;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .discover-exact .discover-recommend-card p {
   font-size: 0.7rem;
+  line-height: 1.32;
+}
+
+.discover-exact .discover-recommend-card > p:not(.discover-recommend-byline) {
+  min-height: 1.85rem;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.discover-exact .discover-recommend-byline {
+  min-height: 1.85rem;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .discover-exact .discover-recommend-meta {
@@ -3584,51 +3684,56 @@ input {
 }
 
 .discover-exact .discover-category-grid {
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 0.56rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.46rem;
+  align-items: center;
 }
 
 .discover-exact .discover-category-card {
-  border: none;
-  background: transparent;
-  padding: 0;
-  gap: 0.3rem;
+  border: 1px solid rgba(172, 207, 184, 0.88);
+  background: rgba(255, 255, 255, 0.9);
+  border-radius: 10px;
+  padding: 0.36rem 0.62rem;
+  gap: 0.14rem;
   box-shadow: none;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .discover-exact .discover-category-card:hover {
   transform: none;
   box-shadow: none;
+  border-color: rgba(115, 182, 140, 0.84);
 }
 
 .discover-exact .discover-category-card.active {
-  background: transparent;
-}
-
-.discover-exact .discover-mini-cover {
-  aspect-ratio: 1.08;
-  border-radius: 7px;
-  border: 1px solid rgba(178, 209, 189, 0.68);
-  box-shadow: 0 8px 14px rgba(31, 88, 62, 0.13);
+  background: rgba(20, 126, 91, 0.14);
+  border-color: rgba(59, 168, 110, 0.84);
 }
 
 .discover-exact .discover-category-card strong {
-  font-size: 0.78rem;
-  line-height: 1.28;
+  font-size: 0.76rem;
+  line-height: 1.2;
 }
 
 .discover-exact .discover-category-card span {
-  font-size: 0.7rem;
+  font-size: 0.66rem;
+  color: #5f7f73;
 }
 
 .discover-exact .discover-results-grid {
-  grid-template-columns: 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.68rem;
 }
 
 .discover-exact .discover-result-card {
   border: 1px solid rgba(172, 207, 184, 0.58);
   background: rgba(255, 255, 255, 0.88);
   border-radius: 12px;
+  grid-template-columns: minmax(94px, 108px) minmax(0, 1fr);
+  gap: 0.62rem;
+  align-items: start;
 }
 
 .discover-exact .empty-state {
@@ -3636,7 +3741,6 @@ input {
   background: rgba(255, 255, 255, 0.76);
   font-size: 0.8rem;
 }
-
 @media (max-width: 1100px) {
   .discover-exact .discover-app-card {
     border-radius: 20px;
@@ -3659,7 +3763,11 @@ input {
   }
 
   .discover-exact .discover-category-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.4rem;
+  }
+
+  .discover-exact .discover-results-grid {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -3683,11 +3791,11 @@ input {
   }
 
   .discover-exact .discover-category-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.36rem;
   }
 
   .discover-exact .discover-recommend-grid {
-    grid-auto-columns: minmax(130px, 148px);
+    grid-auto-columns: 142px;
   }
 }
 
@@ -3973,4 +4081,194 @@ input {
 .discover-exact .discover-main > *,
 .discover-exact .discover-content-stack > * {
   align-self: start;
+}
+
+/* Book metadata display blocks */
+.discover-recommend-byline {
+  margin: 0;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  line-height: 1.35;
+}
+
+.discover-book-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.16rem 0.58rem;
+}
+
+.discover-book-meta-grid .discover-result-meta {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.discover-book-meta-grid strong {
+  color: var(--forest-900);
+  font-weight: 700;
+}
+
+.discover-result-description strong,
+.reservation-item-meta strong {
+  color: var(--forest-900);
+  font-weight: 700;
+}
+
+.reservation-item-meta {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 920px) {
+  .discover-book-meta-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+/* Reservation card polish: readable metadata, fixed action position, 2/3-up mapping */
+.discover-exact .reservation-workspace-grid {
+  grid-template-columns: 1fr;
+  gap: 0.84rem;
+}
+
+.discover-exact .reservation-list-available {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.8rem;
+}
+
+.discover-exact .reservation-list-active {
+  grid-template-columns: 1fr;
+}
+
+.discover-exact .reservation-item {
+  display: grid;
+  grid-template-columns: 108px minmax(0, 1fr);
+  grid-template-rows: auto 1fr;
+  grid-template-areas:
+    "cover content"
+    "cover actions";
+  gap: 0.62rem 0.72rem;
+  align-items: start;
+  min-height: 214px;
+  border-radius: 14px;
+  border: 1px solid rgba(140, 207, 160, 0.78);
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.97), rgba(247, 253, 249, 0.94));
+  padding: 0.72rem;
+}
+
+.discover-exact .reservation-item .discover-result-cover {
+  grid-area: cover;
+  width: 100%;
+  height: 100%;
+  min-height: 154px;
+  align-self: stretch;
+  border-radius: 10px;
+}
+
+.discover-exact .reservation-item-content {
+  grid-area: content;
+  min-width: 0;
+  display: grid;
+  gap: 0.34rem;
+  align-content: start;
+}
+
+.discover-exact .reservation-item-head {
+  gap: 0.42rem;
+  align-items: flex-start;
+}
+
+.discover-exact .reservation-item-title {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.3;
+}
+
+.discover-exact .reservation-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.22rem 0.7rem;
+}
+
+.discover-exact .reservation-item-meta {
+  margin: 0;
+  font-size: 0.74rem;
+  line-height: 1.32;
+  color: var(--text-muted);
+}
+
+.discover-exact .reservation-description {
+  margin-top: 0.12rem;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+
+.discover-exact .reservation-item-actions {
+  grid-area: actions;
+  justify-self: end;
+  align-self: end;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.discover-exact .reservation-item-actions .btn {
+  margin: 0;
+}
+
+@media (min-width: 1760px) {
+  .discover-exact .reservation-list-available {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 1240px) {
+  .discover-exact .reservation-item {
+    grid-template-columns: 96px minmax(0, 1fr);
+    min-height: 202px;
+  }
+}
+
+@media (max-width: 980px) {
+  .discover-exact .reservation-list-available {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 680px) {
+  .discover-exact .reservation-item {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto auto;
+    grid-template-areas:
+      "cover"
+      "content"
+      "actions";
+    min-height: 0;
+  }
+
+  .discover-exact .reservation-item .discover-result-cover {
+    width: 92px;
+    min-height: 136px;
+    height: auto;
+  }
+
+  .discover-exact .reservation-meta-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .discover-exact .reservation-item-actions {
+    justify-self: start;
+  }
 }
