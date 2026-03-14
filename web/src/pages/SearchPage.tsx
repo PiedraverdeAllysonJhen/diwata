@@ -2,7 +2,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Session } from "@supabase/supabase-js";
 import { useNavigate } from "react-router-dom";
 import { hasSupabaseEnv, supabase } from "../lib/supabase";
-import ReservationNotifier from "../components/ReservationNotifier";
+import PortalLiveIndicator from "../components/PortalLiveIndicator";
+import PortalSubhead from "../components/PortalSubhead";
+import PortalSummaryStrip from "../components/PortalSummaryStrip";
+import PortalTopbar from "../components/PortalTopbar";
 import { useReservationNotifier } from "../hooks/useReservationNotifier";
 
 type RawCategoryRelation = {
@@ -397,106 +400,67 @@ export default function SearchPage() {
   return (
     <main className="portal-page">
       <div className="portal-shell">
-        <header className="portal-topbar">
-          <button type="button" className="portal-brand" onClick={() => navigate("/dashboard")}>
-            <img src="/assets/bookitstudent-logo.jpg" alt="BookItStudent logo" />
-            <span>
-              <strong>BookItStudent</strong>
-              <em>Visayas State University</em>
-            </span>
-          </button>
+        <PortalTopbar
+          activeRoute="search"
+          userEmail={userEmail}
+          notifier={{
+            notifications: notifier.notifications,
+            unreadCount: notifier.unreadCount,
+            isOpen: notifier.isOpen,
+            onToggle: notifier.toggleOpen,
+            onClose: notifier.close,
+            onMarkRead: notifier.markAsRead,
+            onMarkAllRead: notifier.markAllAsRead
+          }}
+          onNavigate={(route) => navigate(`/${route}`)}
+          onSignOut={async () => {
+            await supabase.auth.signOut();
+            navigate("/", { replace: true });
+          }}
+        />
 
-          <nav className="portal-nav" aria-label="Primary navigation">
-            <button type="button" className="portal-nav-item" onClick={() => navigate("/dashboard")}>
-              Dashboard
-            </button>
-            <button
-              type="button"
-              className="portal-nav-item"
-              onClick={() => navigate("/reservations")}
-            >
-              Reservations
-            </button>
-            <button type="button" className="portal-nav-item active" onClick={() => navigate("/search")}>
-              Search
-            </button>
-          </nav>
-
-          <div className="portal-user-controls">
-            <ReservationNotifier
-              notifications={notifier.notifications}
-              unreadCount={notifier.unreadCount}
-              isOpen={notifier.isOpen}
-              onToggle={notifier.toggleOpen}
-              onClose={notifier.close}
-              onMarkRead={notifier.markAsRead}
-              onMarkAllRead={notifier.markAllAsRead}
-            />
-            <p className="portal-user-email" title={userEmail}>
-              {userEmail}
-            </p>
-            <button
-              type="button"
-              className="btn btn-primary btn-small"
-              onClick={async () => {
-                await supabase.auth.signOut();
-                navigate("/", { replace: true });
-              }}
-            >
-              Sign out
-            </button>
-          </div>
-        </header>
-
-        <section className="portal-subhead search-subhead">
-          <div>
-            <p className="eyebrow">DW.010.003</p>
-            <h1>Book Search and Categorization</h1>
-            <p>
-              Search the catalog by keyword, category, language, and availability to find the best
-              book for your needs.
-            </p>
-          </div>
-          <div className="portal-hero-actions">
-            <button
-              type="button"
-              className="btn btn-soft"
-              onClick={() => {
-                void loadCatalog("manual");
-              }}
-              disabled={isFetching}
-            >
-              {isFetching ? "Refreshing..." : "Refresh catalog"}
-            </button>
-            {hasFilters ? (
-              <button type="button" className="btn btn-soft" onClick={clearFilters}>
-                Clear filters
+        <PortalSubhead
+          releaseCode="DW.010.003"
+          title="Book Search and Categorization"
+          description="Search the catalog by keyword, category, language, and availability to find the best book for your needs."
+          className="search-subhead"
+          actions={
+            <>
+              <button
+                type="button"
+                className="btn btn-soft"
+                onClick={() => {
+                  void loadCatalog("manual");
+                }}
+                disabled={isFetching}
+              >
+                {isFetching ? "Refreshing..." : "Refresh catalog"}
               </button>
-            ) : null}
-          </div>
-        </section>
+              {hasFilters ? (
+                <button type="button" className="btn btn-soft" onClick={clearFilters}>
+                  Clear filters
+                </button>
+              ) : null}
+            </>
+          }
+        />
 
-        <p className={`live-indicator ${isLiveSyncing ? "syncing" : ""}`}>
-          <span className="live-dot" aria-hidden="true" />
-          {isLiveSyncing ? "Syncing live updates..." : "Live availability active"} | {formatLastSync(lastSyncedAt)}
-        </p>
+        <PortalLiveIndicator
+          isSyncing={isLiveSyncing}
+          text={`${isLiveSyncing ? "Syncing live updates..." : "Live availability active"} | ${formatLastSync(lastSyncedAt)}`}
+        />
 
         {notice ? <p className="status error portal-notice">{notice}</p> : null}
 
-        <section className="reservation-summary-strip search-summary-strip" aria-label="Search summary">
-          <article className="summary-card">
-            <span>Total Catalog</span>
-            <strong>{books.length}</strong>
-          </article>
-          <article className="summary-card">
-            <span>Available Now</span>
-            <strong>{availableNowCount}</strong>
-          </article>
-          <article className="summary-card">
-            <span>Filtered Results</span>
-            <strong>{filteredBooks.length}</strong>
-          </article>
-        </section>
+        <PortalSummaryStrip
+          ariaLabel="Search summary"
+          className="search-summary-strip"
+          metrics={[
+            { label: "Total Catalog", value: books.length },
+            { label: "Available Now", value: availableNowCount },
+            { label: "Filtered Results", value: filteredBooks.length }
+          ]}
+        />
 
         <section className="search-toolbar">
           <label htmlFor="catalog-search" className="search-field">
@@ -641,6 +605,4 @@ export default function SearchPage() {
     </main>
   );
 }
-
-
 

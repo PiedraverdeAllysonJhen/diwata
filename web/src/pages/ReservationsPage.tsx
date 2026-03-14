@@ -2,7 +2,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Session } from "@supabase/supabase-js";
 import { useNavigate } from "react-router-dom";
 import { hasSupabaseEnv, supabase } from "../lib/supabase";
-import ReservationNotifier from "../components/ReservationNotifier";
+import PortalLiveIndicator from "../components/PortalLiveIndicator";
+import PortalSubhead from "../components/PortalSubhead";
+import PortalSummaryStrip from "../components/PortalSummaryStrip";
+import PortalTopbar from "../components/PortalTopbar";
 import { useReservationNotifier } from "../hooks/useReservationNotifier";
 
 type BookRecord = {
@@ -356,94 +359,60 @@ export default function ReservationsPage() {
   return (
     <main className="portal-page">
       <div className="portal-shell">
-        <header className="portal-topbar">
-          <button type="button" className="portal-brand" onClick={() => navigate("/dashboard")}>
-            <img src="/assets/bookitstudent-logo.jpg" alt="BookItStudent logo" />
-            <span>
-              <strong>BookItStudent</strong>
-              <em>Visayas State University</em>
-            </span>
-          </button>
+        <PortalTopbar
+          activeRoute="reservations"
+          userEmail={userEmail}
+          notifier={{
+            notifications: notifier.notifications,
+            unreadCount: notifier.unreadCount,
+            isOpen: notifier.isOpen,
+            onToggle: notifier.toggleOpen,
+            onClose: notifier.close,
+            onMarkRead: notifier.markAsRead,
+            onMarkAllRead: notifier.markAllAsRead
+          }}
+          onNavigate={(route) => navigate(`/${route}`)}
+          onSignOut={handleSignOut}
+        />
 
-          <nav className="portal-nav" aria-label="Primary navigation">
-            <button type="button" className="portal-nav-item" onClick={() => navigate("/dashboard")}>
-              Dashboard
-            </button>
-            <button
-              type="button"
-              className="portal-nav-item active"
-              onClick={() => navigate("/reservations")}
-            >
-              Reservations
-            </button>
-            <button type="button" className="portal-nav-item" onClick={() => navigate("/search")}>
-              Search
-            </button>
-          </nav>
+        <PortalSubhead
+          releaseCode="DW.010.003"
+          title="Reservation Workspace"
+          description="Reserve available books and manage your active reservation queue in one place."
+          actions={
+            <>
+              <button
+                type="button"
+                className="btn btn-soft"
+                onClick={() => {
+                  void loadReservationData("manual");
+                }}
+                disabled={isFetching}
+              >
+                {isFetching ? "Refreshing..." : "Refresh list"}
+              </button>
+              <button type="button" className="btn btn-soft" onClick={() => navigate("/search")}>
+                Open advanced search
+              </button>
+            </>
+          }
+        />
 
-          <div className="portal-user-controls">
-            <ReservationNotifier
-              notifications={notifier.notifications}
-              unreadCount={notifier.unreadCount}
-              isOpen={notifier.isOpen}
-              onToggle={notifier.toggleOpen}
-              onClose={notifier.close}
-              onMarkRead={notifier.markAsRead}
-              onMarkAllRead={notifier.markAllAsRead}
-            />
-            <p className="portal-user-email" title={userEmail}>
-              {userEmail}
-            </p>
-            <button type="button" className="btn btn-primary btn-small" onClick={handleSignOut}>
-              Sign out
-            </button>
-          </div>
-        </header>
-
-        <section className="portal-subhead">
-          <div>
-            <p className="eyebrow">DW.010.003</p>
-            <h1>Reservation Workspace</h1>
-            <p>Reserve available books and manage your active reservation queue in one place.</p>
-          </div>
-          <div className="portal-hero-actions">
-            <button
-              type="button"
-              className="btn btn-soft"
-              onClick={() => {
-                void loadReservationData("manual");
-              }}
-              disabled={isFetching}
-            >
-              {isFetching ? "Refreshing..." : "Refresh list"}
-            </button>
-            <button type="button" className="btn btn-soft" onClick={() => navigate("/search")}>
-              Open advanced search
-            </button>
-          </div>
-        </section>
-
-        <p className={`live-indicator ${isLiveSyncing ? "syncing" : ""}`}>
-          <span className="live-dot" aria-hidden="true" />
-          {isLiveSyncing ? "Syncing live updates..." : "Live availability active"} | {formatLastSync(lastSyncedAt)}
-        </p>
+        <PortalLiveIndicator
+          isSyncing={isLiveSyncing}
+          text={`${isLiveSyncing ? "Syncing live updates..." : "Live availability active"} | ${formatLastSync(lastSyncedAt)}`}
+        />
 
         {notice ? <p className={`status ${notice.type} portal-notice`}>{notice.text}</p> : null}
 
-        <section className="reservation-summary-strip" aria-label="Reservation summary">
-          <article className="summary-card">
-            <span>Books Available</span>
-            <strong>{books.length}</strong>
-          </article>
-          <article className="summary-card">
-            <span>Active Reservations</span>
-            <strong>{reservations.length}</strong>
-          </article>
-          <article className="summary-card">
-            <span>Search Results</span>
-            <strong>{filteredBooks.length}</strong>
-          </article>
-        </section>
+        <PortalSummaryStrip
+          ariaLabel="Reservation summary"
+          metrics={[
+            { label: "Books Available", value: books.length },
+            { label: "Active Reservations", value: reservations.length },
+            { label: "Search Results", value: filteredBooks.length }
+          ]}
+        />
 
         <section className="reservation-toolbar">
           <label htmlFor="book-search" className="search-field">
@@ -563,5 +532,4 @@ export default function ReservationsPage() {
     </main>
   );
 }
-
 
