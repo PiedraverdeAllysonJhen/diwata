@@ -18,6 +18,10 @@ type RawCategoryRelation = {
   categories: { id: string; name: string } | { id: string; name: string }[] | null;
 };
 
+type RawCopyStatusRelation = {
+  status: string | null;
+};
+
 type RawBookRecord = {
   id: string;
   isbn: string | null;
@@ -32,6 +36,7 @@ type RawBookRecord = {
   available_copies: number;
   total_copies: number;
   tags: string[] | null;
+  book_copies: RawCopyStatusRelation[] | null;
   book_categories: RawCategoryRelation[] | null;
   book_authors: RawAuthorRelation[] | null;
 };
@@ -50,6 +55,7 @@ type SearchBook = {
   availableCopies: number;
   totalCopies: number;
   tags: string[];
+  copyStatuses: string[];
   categories: string[];
   authors: string[];
 };
@@ -59,8 +65,9 @@ type CategoryRow = {
   name: string;
 };
 
-type FilterAvailability = "all" | "available" | "low_stock" | "out_of_stock";
+type FilterAvailability = "all" | "available" | "borrowed" | "reserved";
 type LoadSource = "manual" | "live";
+type AvailabilityState = Exclude<FilterAvailability, "all">;
 
 type CategoryCount = {
   id: string;
@@ -91,6 +98,21 @@ function normalizeCategories(relations: RawCategoryRelation[] | null): string[] 
   return Array.from(values).sort((a, b) => a.localeCompare(b));
 }
 
+function normalizeCopyStatuses(relations: RawCopyStatusRelation[] | null): string[] {
+  if (!relations || relations.length === 0) return [];
+
+  const values = new Set<AvailabilityState>();
+
+  for (const relation of relations) {
+    const status = relation.status?.toLowerCase();
+    if (status === "available" || status === "borrowed" || status === "reserved") {
+      values.add(status);
+    }
+  }
+
+  return Array.from(values);
+}
+
 function normalizeBook(record: RawBookRecord): SearchBook {
   return {
     id: record.id,
@@ -106,26 +128,46 @@ function normalizeBook(record: RawBookRecord): SearchBook {
     availableCopies: record.available_copies,
     totalCopies: record.total_copies,
     tags: normalizeTags(record.tags),
+    copyStatuses: normalizeCopyStatuses(record.book_copies),
     categories: normalizeCategories(record.book_categories),
     authors: normalizeAuthors(record.book_authors)
   };
 }
 
-function getAvailabilityState(book: SearchBook): Exclude<FilterAvailability, "all"> {
-  if (book.availableCopies <= 0) return "out_of_stock";
-  if (book.availableCopies <= 2) return "low_stock";
-  return "available";
+function getAvailabilityState(book: SearchBook): AvailabilityState {
+  const statusSet = new Set(book.copyStatuses);
+
+  if (statusSet.has("available")) return "available";
+  if (statusSet.has("borrowed")) return "borrowed";
+  if (statusSet.has("reserved")) return "reserved";
+
+  // Fallback for incomplete copy rows: infer from copy counters.
+  if (book.availableCopies > 0) return "available";
+  if (book.totalCopies > 0 && book.availableCopies <= 0) return "borrowed";
+
+  return "reserved";
 }
 
-function getAvailabilityLabel(status: Exclude<FilterAvailability, "all">): string {
+function getAvailabilityLabel(status: AvailabilityState): string {
   if (status === "available") return "Available";
-  if (status === "low_stock") return "Low stock";
-  return "Out of stock";
+  if (status === "borrowed") return "Borrowed";
+  return "Reserved";
 }
 
-function matchesAvailability(filter: FilterAvailability, status: Exclude<FilterAvailability, "all">) {
+function matchesAvailability(filter: FilterAvailability, status: AvailabilityState) {
   if (filter === "all") return true;
   return filter === status;
+}
+
+function canReserveFromSearch(status: AvailabilityState) {
+  // Reservation workspace currently accepts direct reserve from available inventory.
+  return status === "available";
+}
+
+function getAvailabilityRank(status: AvailabilityState) {
+  if (status === "available") return 3;
+  if (status === "reserved") return 2;
+  return 1;
 }
 
 function formatLastSync(value: string | null) {
@@ -226,7 +268,7 @@ export default function SearchPage() {
       supabase
         .from("books")
         .select(
-          "id,isbn,title,subtitle,description,publisher,language,publication_year,publication_date,cover_image_url,available_copies,total_copies,tags,book_categories(category_id,categories(id,name)),book_authors(author_id,authors(id,name))"
+          "id,isbn,title,subtitle,description,publisher,language,publication_year,publication_date,cover_image_url,available_copies,total_copies,tags,book_copies(status),book_categories(category_id,categories(id,name)),book_authors(author_id,authors(id,name))"
         )
         .order("title", { ascending: true })
         .limit(300),
@@ -383,9 +425,9 @@ export default function SearchPage() {
     return [...filteredBooks]
       .sort((a, b) => {
         const availabilityRankA =
-          getAvailabilityState(a) === "available" ? 2 : getAvailabilityState(a) === "low_stock" ? 1 : 0;
+          getAvailabilityRank(getAvailabilityState(a));
         const availabilityRankB =
-          getAvailabilityState(b) === "available" ? 2 : getAvailabilityState(b) === "low_stock" ? 1 : 0;
+          getAvailabilityRank(getAvailabilityState(b));
 
         if (availabilityRankA !== availabilityRankB) {
           return availabilityRankB - availabilityRankA;
@@ -557,8 +599,8 @@ export default function SearchPage() {
             >
               <option value="all">All statuses</option>
               <option value="available">Available</option>
-              <option value="low_stock">Low stock</option>
-              <option value="out_of_stock">Out of stock</option>
+              <option value="borrowed">Borrowed</option>
+              <option value="reserved">Reserved</option>
             </select>
           </label>
 
@@ -615,9 +657,9 @@ export default function SearchPage() {
                       type="button"
                       className="btn btn-soft btn-small"
                       onClick={() => navigate("/reservations")}
-                      disabled={availability === "out_of_stock"}
+                      disabled={!canReserveFromSearch(availability)}
                     >
-                      {availability === "out_of_stock" ? "Unavailable" : "Reserve"}
+                      {!canReserveFromSearch(availability) ? "Unavailable" : "Reserve"}
                     </button>
                   </div>
                 </article>
@@ -721,9 +763,9 @@ export default function SearchPage() {
                           type="button"
                           className="btn btn-primary btn-small"
                           onClick={() => navigate("/reservations")}
-                          disabled={availabilityState === "out_of_stock"}
+                          disabled={!canReserveFromSearch(availabilityState)}
                         >
-                          {availabilityState === "out_of_stock" ? "Unavailable right now" : "Reserve from reservations"}
+                          {!canReserveFromSearch(availabilityState) ? "Unavailable right now" : "Reserve from reservations"}
                         </button>
                       </div>
                     </div>
@@ -737,5 +779,9 @@ export default function SearchPage() {
     </LibraryWorkspaceLayout>
   );
 }
+
+
+
+
 
 

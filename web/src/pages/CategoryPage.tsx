@@ -17,6 +17,10 @@ type RawCategoryRelation = {
   categories: { id: string; name: string } | { id: string; name: string }[] | null;
 };
 
+type RawCopyStatusRelation = {
+  status: string | null;
+};
+
 type RawBookRecord = {
   id: string;
   isbn: string | null;
@@ -31,6 +35,7 @@ type RawBookRecord = {
   available_copies: number;
   total_copies: number;
   tags: string[] | null;
+  book_copies: RawCopyStatusRelation[] | null;
   book_categories: RawCategoryRelation[] | null;
   book_authors: RawAuthorRelation[] | null;
 };
@@ -49,6 +54,7 @@ type BookRecord = {
   availableCopies: number;
   totalCopies: number;
   tags: string[];
+  copyStatuses: string[];
   categories: string[];
   authors: string[];
 };
@@ -59,6 +65,7 @@ type CategoryRow = {
 };
 
 type LoadSource = "manual" | "live";
+type AvailabilityState = "available" | "borrowed" | "reserved";
 
 type CategoryCount = {
   id: string;
@@ -89,6 +96,21 @@ function normalizeCategories(relations: RawCategoryRelation[] | null): string[] 
   return Array.from(values).sort((a, b) => a.localeCompare(b));
 }
 
+function normalizeCopyStatuses(relations: RawCopyStatusRelation[] | null): string[] {
+  if (!relations || relations.length === 0) return [];
+
+  const values = new Set<AvailabilityState>();
+
+  for (const relation of relations) {
+    const status = relation.status?.toLowerCase();
+    if (status === "available" || status === "borrowed" || status === "reserved") {
+      values.add(status);
+    }
+  }
+
+  return Array.from(values);
+}
+
 function normalizeBook(record: RawBookRecord): BookRecord {
   return {
     id: record.id,
@@ -104,9 +126,37 @@ function normalizeBook(record: RawBookRecord): BookRecord {
     availableCopies: record.available_copies,
     totalCopies: record.total_copies,
     tags: record.tags ?? [],
+    copyStatuses: normalizeCopyStatuses(record.book_copies),
     categories: normalizeCategories(record.book_categories),
     authors: normalizeAuthors(record.book_authors)
   };
+}
+
+function getAvailabilityState(book: Pick<BookRecord, "copyStatuses" | "availableCopies" | "totalCopies">): AvailabilityState {
+  const statusSet = new Set(book.copyStatuses);
+
+  if (statusSet.has("available")) return "available";
+  if (statusSet.has("borrowed")) return "borrowed";
+  if (statusSet.has("reserved")) return "reserved";
+
+  if (book.availableCopies > 0) return "available";
+  if (book.totalCopies > 0 && book.availableCopies <= 0) return "borrowed";
+
+  return "reserved";
+}
+
+function getAvailabilityLabel(status: AvailabilityState) {
+  if (status === "available") return "Available";
+  if (status === "borrowed") return "Borrowed";
+  return "Reserved";
+}
+
+function getAvailabilityClass(status: AvailabilityState) {
+  return status;
+}
+
+function canReserveFromCategory(status: AvailabilityState) {
+  return status === "available";
 }
 
 function formatLastSync(value: string | null) {
@@ -136,18 +186,6 @@ function getBookMonogram(title: string): string {
 function getToneClass(seed: string): string {
   const hash = Array.from(seed).reduce((acc, char) => acc + char.charCodeAt(0), 0);
   return `tone-${(hash % 5) + 1}`;
-}
-
-function getAvailabilityLabel(availableCopies: number) {
-  if (availableCopies <= 0) return "Out of stock";
-  if (availableCopies <= 2) return "Low stock";
-  return "Available";
-}
-
-function getAvailabilityClass(availableCopies: number) {
-  if (availableCopies <= 0) return "out_of_stock";
-  if (availableCopies <= 2) return "low_stock";
-  return "available";
 }
 
 export default function CategoryPage() {
@@ -215,7 +253,7 @@ export default function CategoryPage() {
       supabase
         .from("books")
         .select(
-          "id,isbn,title,subtitle,description,publisher,language,publication_year,publication_date,cover_image_url,available_copies,total_copies,tags,book_categories(category_id,categories(id,name)),book_authors(author_id,authors(id,name))"
+          "id,isbn,title,subtitle,description,publisher,language,publication_year,publication_date,cover_image_url,available_copies,total_copies,tags,book_copies(status),book_categories(category_id,categories(id,name)),book_authors(author_id,authors(id,name))"
         )
         .order("title", { ascending: true })
         .limit(300),
@@ -315,7 +353,7 @@ export default function CategoryPage() {
         if (!current) continue;
 
         current.total += 1;
-        if (book.availableCopies > 0) {
+        if (getAvailabilityState(book) === "available") {
           current.available += 1;
         }
       }
@@ -465,7 +503,8 @@ export default function CategoryPage() {
         ) : (
           <div className="discover-results-grid">
             {filteredBooks.map((book) => {
-              const availabilityClass = getAvailabilityClass(book.availableCopies);
+              const availabilityState = getAvailabilityState(book);
+              const availabilityClass = getAvailabilityClass(availabilityState);
               return (
                 <article key={book.id} className="discover-result-card">
                   <div
@@ -485,7 +524,7 @@ export default function CategoryPage() {
                     <div className="discover-result-head">
                       <h3>{book.title}</h3>
                       <span className={`availability-pill ${availabilityClass}`}>
-                        {getAvailabilityLabel(book.availableCopies)}
+                        {getAvailabilityLabel(availabilityState)}
                       </span>
                     </div>
 
@@ -509,9 +548,9 @@ export default function CategoryPage() {
                         type="button"
                         className="btn btn-primary btn-small"
                         onClick={() => navigate("/reservations")}
-                        disabled={book.availableCopies <= 0}
+                        disabled={!canReserveFromCategory(availabilityState)}
                       >
-                        {book.availableCopies <= 0 ? "Unavailable right now" : "Reserve from reservations"}
+                        {!canReserveFromCategory(availabilityState) ? "Unavailable right now" : "Reserve from reservations"}
                       </button>
                     </div>
                   </div>
@@ -524,4 +563,7 @@ export default function CategoryPage() {
     </LibraryWorkspaceLayout>
   );
 }
+
+
+
 
