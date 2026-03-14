@@ -278,7 +278,7 @@ export default function ReservationsPage() {
     <main className="portal-page">
       <div className="portal-shell">
         <header className="portal-topbar">
-          <button type="button" className="portal-brand" onClick={() => navigate("/dashboard")}> 
+          <button type="button" className="portal-brand" onClick={() => navigate("/dashboard")}>
             <img src="/assets/bookitstudent-logo.jpg" alt="BookItStudent logo" />
             <span>
               <strong>BookItStudent</strong>
@@ -287,7 +287,7 @@ export default function ReservationsPage() {
           </button>
 
           <nav className="portal-nav" aria-label="Primary navigation">
-            <button type="button" className="portal-nav-item" onClick={() => navigate("/dashboard")}> 
+            <button type="button" className="portal-nav-item" onClick={() => navigate("/dashboard")}>
               Dashboard
             </button>
             <button
@@ -296,6 +296,9 @@ export default function ReservationsPage() {
               onClick={() => navigate("/reservations")}
             >
               Reservations
+            </button>
+            <button type="button" className="portal-nav-item" onClick={() => navigate("/search")}>
+              Search
             </button>
           </nav>
 
@@ -325,6 +328,9 @@ export default function ReservationsPage() {
               disabled={isFetching}
             >
               {isFetching ? "Refreshing..." : "Refresh list"}
+            </button>
+            <button type="button" className="btn btn-soft" onClick={() => navigate("/search")}>
+              Open advanced search
             </button>
           </div>
         </section>
@@ -382,8 +388,8 @@ export default function ReservationsPage() {
                         {book.subtitle ? <p className="reservation-item-meta">{book.subtitle}</p> : null}
                         <p className="reservation-item-meta">
                           {book.available_copies} of {book.total_copies} copies available
-                          {book.language ? ` • ${book.language}` : ""}
-                          {book.publication_year ? ` • ${book.publication_year}` : ""}
+                          {book.language ? ` | ${book.language}` : ""}
+                          {book.publication_year ? ` | ${book.publication_year}` : ""}
                         </p>
                       </div>
                       <div className="reservation-item-actions">
