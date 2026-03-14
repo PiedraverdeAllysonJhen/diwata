@@ -2,7 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Session } from "@supabase/supabase-js";
 import { hasSupabaseEnv, supabase } from "../lib/supabase";
-import ReservationNotifier from "../components/ReservationNotifier";
+import PortalLiveIndicator from "../components/PortalLiveIndicator";
+import LibraryWorkspaceLayout from "../components/LibraryWorkspaceLayout";
 import { useReservationNotifier } from "../hooks/useReservationNotifier";
 
 type DashboardMetrics = {
@@ -268,173 +269,120 @@ export default function DashboardPage() {
   }
 
   return (
-    <main className="portal-page">
-      <div className="portal-shell">
-        <header className="portal-topbar">
-          <button type="button" className="portal-brand" onClick={() => navigate("/dashboard")}>
-            <img src="/assets/bookitstudent-logo.jpg" alt="BookItStudent logo" />
-            <span>
-              <strong>BookItStudent</strong>
-              <em>Visayas State University</em>
-            </span>
+    <LibraryWorkspaceLayout
+      activeRoute="dashboard"
+      activeMenuKey="library"
+      title="Student Dashboard"
+      description="Track reservations, monitor availability, and jump quickly into search or reservation actions."
+      userEmail={userEmail}
+      notifier={{
+        notifications: notifier.notifications,
+        unreadCount: notifier.unreadCount,
+        isOpen: notifier.isOpen,
+        onToggle: notifier.toggleOpen,
+        onClose: notifier.close,
+        onMarkRead: notifier.markAsRead,
+        onMarkAllRead: notifier.markAllAsRead
+      }}
+      sidebarStats={[
+        { label: "Available Books", value: String(metrics.availableBooks) },
+        { label: "Active Reservations", value: String(metrics.activeReservations) }
+      ]}
+      sidebarAction={{
+        label: isDataLoading ? "Refreshing..." : "Refresh Data",
+        onClick: () => {
+          void loadDashboardData("manual");
+        },
+        disabled: isDataLoading
+      }}
+      headerActions={
+        <div className="discover-inline-actions">
+          <button type="button" className="btn btn-soft btn-small" onClick={() => navigate("/search")}>
+            Open Discover
           </button>
+          <button
+            type="button"
+            className="btn btn-soft btn-small"
+            onClick={() => navigate("/reservations")}
+          >
+            Open Reservations
+          </button>
+        </div>
+      }
+      statusBar={
+        <PortalLiveIndicator
+          isSyncing={isLiveSyncing}
+          text={`${isLiveSyncing ? "Syncing live updates..." : "Live availability active"} | ${formatLastSync(lastSyncedAt)}`}
+        />
+      }
+      notice={dataError ? <p className="status error portal-notice">{dataError}</p> : undefined}
+      onNavigate={(route) => navigate(`/${route}`)}
+      onSignOut={handleSignOut}
+    >
+      <section className="discover-stat-strip" aria-label="Dashboard metrics">
+        <article className="discover-stat-card">
+          <span>Available Books</span>
+          <strong>{metrics.availableBooks}</strong>
+        </article>
+        <article className="discover-stat-card">
+          <span>Active Reservations</span>
+          <strong>{metrics.activeReservations}</strong>
+        </article>
+        <article className="discover-stat-card">
+          <span>Ready For Pickup</span>
+          <strong>{metrics.readyForPickup}</strong>
+        </article>
+      </section>
 
-          <nav className="portal-nav" aria-label="Primary navigation">
-            <button type="button" className="portal-nav-item active" onClick={() => navigate("/dashboard")}>
-              Dashboard
-            </button>
-            <button
-              type="button"
-              className="portal-nav-item"
-              onClick={() => navigate("/reservations")}
-            >
-              Reservations
-            </button>
-            <button type="button" className="portal-nav-item" onClick={() => navigate("/search")}>
-              Search
-            </button>
-          </nav>
-
-          <div className="portal-user-controls">
-            <ReservationNotifier
-              notifications={notifier.notifications}
-              unreadCount={notifier.unreadCount}
-              isOpen={notifier.isOpen}
-              onToggle={notifier.toggleOpen}
-              onClose={notifier.close}
-              onMarkRead={notifier.markAsRead}
-              onMarkAllRead={notifier.markAllAsRead}
-            />
-            <p className="portal-user-email" title={userEmail}>
-              {userEmail}
-            </p>
-            <button type="button" className="btn btn-primary btn-small" onClick={handleSignOut}>
-              Sign out
-            </button>
-          </div>
+      <section className="discover-section" aria-label="Recent reservation activity">
+        <header className="discover-section-head">
+          <h2>Recent Reservation Activity</h2>
         </header>
 
-        <section className="portal-hero">
-          <div className="portal-hero-copy">
-            <p className="eyebrow">Learning Commons Portal</p>
-            <h1>Student Dashboard</h1>
-            <p>
-              Check your reservation progress, search catalog categories, monitor available books,
-              and jump directly to your reservation workspace.
-            </p>
-            <div className="portal-hero-actions">
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={() => navigate("/reservations")}
-              >
-                Open reservation workspace
-              </button>
-              <button type="button" className="btn btn-soft" onClick={() => navigate("/search")}>
-                Open book search
-              </button>
-              <button
-                type="button"
-                className="btn btn-soft"
-                onClick={() => {
-                  void loadDashboardData("manual");
-                }}
-                disabled={isDataLoading}
-              >
-                {isDataLoading ? "Refreshing..." : "Refresh data"}
-              </button>
-            </div>
+        {recentReservations.length === 0 ? (
+          <p className="empty-state">No reservation activity yet. Start by reserving a book.</p>
+        ) : (
+          <ul className="activity-list">
+            {recentReservations.map((item) => (
+              <li key={item.id} className="activity-item">
+                <div>
+                  <p className="activity-title">{item.books?.title ?? "Unknown book"}</p>
+                  <p className="activity-meta">Requested: {formatDate(item.requested_at)}</p>
+                </div>
+                <span className={`status-pill status-${item.status}`}>{formatStatus(item.status)}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
 
-            <p className={`live-indicator ${isLiveSyncing ? "syncing" : ""}`}>
-              <span className="live-dot" aria-hidden="true" />
-              {isLiveSyncing ? "Syncing live updates..." : "Live availability active"} | {formatLastSync(lastSyncedAt)}
-            </p>
+      <section className="discover-section" aria-label="Quick actions">
+        <header className="discover-section-head">
+          <h2>Quick Actions</h2>
+        </header>
 
-            {dataError ? <p className="status error portal-notice">{dataError}</p> : null}
-          </div>
-
-          <div className="portal-kpis" aria-label="Dashboard metrics">
-            <article className="kpi-card">
-              <span>Available Books</span>
-              <strong>{metrics.availableBooks}</strong>
-            </article>
-            <article className="kpi-card">
-              <span>Active Reservations</span>
-              <strong>{metrics.activeReservations}</strong>
-            </article>
-            <article className="kpi-card">
-              <span>Ready for Pickup</span>
-              <strong>{metrics.readyForPickup}</strong>
-            </article>
-            <article className="kpi-card">
-              <span>Total Requests</span>
-              <strong>{metrics.totalRequests}</strong>
-            </article>
-          </div>
-        </section>
-
-        <section className="portal-content-grid">
-          <article className="portal-panel">
-            <header className="panel-heading">
-              <h2>Recent Reservation Activity</h2>
-              <p>Latest reservation requests under your account.</p>
-            </header>
-
-            {recentReservations.length === 0 ? (
-              <p className="empty-state">No reservation activity yet. Start by reserving a book.</p>
-            ) : (
-              <ul className="activity-list">
-                {recentReservations.map((item) => (
-                  <li key={item.id} className="activity-item">
-                    <div>
-                      <p className="activity-title">{item.books?.title ?? "Unknown book"}</p>
-                      <p className="activity-meta">Requested: {formatDate(item.requested_at)}</p>
-                    </div>
-                    <span className={`status-pill status-${item.status}`}>{formatStatus(item.status)}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </article>
-
-          <article className="portal-panel portal-panel-secondary">
-            <header className="panel-heading">
-              <h2>Quick Actions</h2>
-              <p>Common tasks for faster workflows.</p>
-            </header>
-
-            <div className="quick-actions-grid">
-              <button
-                type="button"
-                className="quick-action"
-                onClick={() => navigate("/search")}
-              >
-                <strong>Search Catalog</strong>
-                <span>Filter by category, language, and availability.</span>
-              </button>
-              <button
-                type="button"
-                className="quick-action"
-                onClick={() => navigate("/reservations")}
-              >
-                <strong>Reserve a Book</strong>
-                <span>Browse available titles and request copies.</span>
-              </button>
-              <button
-                type="button"
-                className="quick-action"
-                onClick={() => {
-                  void loadDashboardData("manual");
-                }}
-              >
-                <strong>Sync Data</strong>
-                <span>Refresh availability and reservation status.</span>
-              </button>
-            </div>
-          </article>
-        </section>
-      </div>
-    </main>
+        <div className="quick-actions-grid">
+          <button type="button" className="quick-action" onClick={() => navigate("/search")}>
+            <strong>Search Catalog</strong>
+            <span>Filter by category, language, and availability.</span>
+          </button>
+          <button type="button" className="quick-action" onClick={() => navigate("/reservations")}>
+            <strong>Reserve a Book</strong>
+            <span>Browse available titles and request copies.</span>
+          </button>
+          <button
+            type="button"
+            className="quick-action"
+            onClick={() => {
+              void loadDashboardData("manual");
+            }}
+          >
+            <strong>Sync Data</strong>
+            <span>Refresh availability and reservation status.</span>
+          </button>
+        </div>
+      </section>
+    </LibraryWorkspaceLayout>
   );
 }
 

@@ -3,9 +3,7 @@ import { Session } from "@supabase/supabase-js";
 import { useNavigate } from "react-router-dom";
 import { hasSupabaseEnv, supabase } from "../lib/supabase";
 import PortalLiveIndicator from "../components/PortalLiveIndicator";
-import PortalSubhead from "../components/PortalSubhead";
-import PortalSummaryStrip from "../components/PortalSummaryStrip";
-import PortalTopbar from "../components/PortalTopbar";
+import LibraryWorkspaceLayout from "../components/LibraryWorkspaceLayout";
 import { useReservationNotifier } from "../hooks/useReservationNotifier";
 
 type BookRecord = {
@@ -357,179 +355,175 @@ export default function ReservationsPage() {
   }
 
   return (
-    <main className="portal-page">
-      <div className="portal-shell">
-        <PortalTopbar
-          activeRoute="reservations"
-          userEmail={userEmail}
-          notifier={{
-            notifications: notifier.notifications,
-            unreadCount: notifier.unreadCount,
-            isOpen: notifier.isOpen,
-            onToggle: notifier.toggleOpen,
-            onClose: notifier.close,
-            onMarkRead: notifier.markAsRead,
-            onMarkAllRead: notifier.markAllAsRead
-          }}
-          onNavigate={(route) => navigate(`/${route}`)}
-          onSignOut={handleSignOut}
-        />
-
-        <PortalSubhead
-          releaseCode="DW.010.003"
-          title="Reservation Workspace"
-          description="Reserve available books and manage your active reservation queue in one place."
-          actions={
-            <>
-              <button
-                type="button"
-                className="btn btn-soft"
-                onClick={() => {
-                  void loadReservationData("manual");
-                }}
-                disabled={isFetching}
-              >
-                {isFetching ? "Refreshing..." : "Refresh list"}
-              </button>
-              <button type="button" className="btn btn-soft" onClick={() => navigate("/search")}>
-                Open advanced search
-              </button>
-            </>
-          }
-        />
-
+    <LibraryWorkspaceLayout
+      activeRoute="reservations"
+      activeMenuKey="reservation"
+      title="Reservation Workspace"
+      description="Reserve available books and manage your active reservation queue in one place."
+      userEmail={userEmail}
+      notifier={{
+        notifications: notifier.notifications,
+        unreadCount: notifier.unreadCount,
+        isOpen: notifier.isOpen,
+        onToggle: notifier.toggleOpen,
+        onClose: notifier.close,
+        onMarkRead: notifier.markAsRead,
+        onMarkAllRead: notifier.markAllAsRead
+      }}
+      sidebarStats={[
+        { label: "Books Available", value: String(books.length) },
+        { label: "Active Queue", value: String(reservations.length) }
+      ]}
+      sidebarAction={{
+        label: isFetching ? "Refreshing..." : "Refresh List",
+        onClick: () => {
+          void loadReservationData("manual");
+        },
+        disabled: isFetching
+      }}
+      headerActions={
+        <div className="discover-inline-actions">
+          <button type="button" className="btn btn-soft btn-small" onClick={() => navigate("/search")}>
+            Open Discover
+          </button>
+          <button type="button" className="btn btn-soft btn-small" onClick={() => navigate("/dashboard")}>
+            Open Dashboard
+          </button>
+        </div>
+      }
+      statusBar={
         <PortalLiveIndicator
           isSyncing={isLiveSyncing}
           text={`${isLiveSyncing ? "Syncing live updates..." : "Live availability active"} | ${formatLastSync(lastSyncedAt)}`}
         />
+      }
+      notice={notice ? <p className={`status ${notice.type} portal-notice`}>{notice.text}</p> : undefined}
+      onNavigate={(route) => navigate(`/${route}`)}
+      onSignOut={handleSignOut}
+    >
+      <section className="discover-stat-strip" aria-label="Reservation summary">
+        <article className="discover-stat-card">
+          <span>Books Available</span>
+          <strong>{books.length}</strong>
+        </article>
+        <article className="discover-stat-card">
+          <span>Active Reservations</span>
+          <strong>{reservations.length}</strong>
+        </article>
+        <article className="discover-stat-card">
+          <span>Search Results</span>
+          <strong>{filteredBooks.length}</strong>
+        </article>
+      </section>
 
-        {notice ? <p className={`status ${notice.type} portal-notice`}>{notice.text}</p> : null}
+      <section className="reservation-toolbar">
+        <label htmlFor="book-search" className="search-field">
+          <span>Search available books</span>
+          <input
+            id="book-search"
+            type="search"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            placeholder="Type title, subtitle, language, or year"
+          />
+        </label>
+        <p className="toolbar-hint">Showing {filteredBooks.length} matching books.</p>
+      </section>
 
-        <PortalSummaryStrip
-          ariaLabel="Reservation summary"
-          metrics={[
-            { label: "Books Available", value: books.length },
-            { label: "Active Reservations", value: reservations.length },
-            { label: "Search Results", value: filteredBooks.length }
-          ]}
-        />
+      <section className="discover-grid-two">
+        <article className="discover-section">
+          <header className="discover-section-head">
+            <h2>Available Books</h2>
+          </header>
 
-        <section className="reservation-toolbar">
-          <label htmlFor="book-search" className="search-field">
-            <span>Search available books</span>
-            <input
-              id="book-search"
-              type="search"
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder="Type title, subtitle, language, or year"
-            />
-          </label>
-          <p className="toolbar-hint">Showing {filteredBooks.length} matching books.</p>
-        </section>
+          {filteredBooks.length === 0 ? (
+            <p className="empty-state">No books match your search right now.</p>
+          ) : (
+            <ul className="reservation-list">
+              {filteredBooks.map((book) => {
+                const isReserved = reservedBookIds.has(book.id);
+                const isActionLoading = activeAction === `reserve-${book.id}`;
 
-        <section className="reservation-layout">
-          <article className="portal-panel">
-            <header className="panel-heading">
-              <h2>Available Books</h2>
-              <p>Reserve books that currently have available copies.</p>
-            </header>
+                return (
+                  <li key={book.id} className="reservation-item">
+                    <div className="reservation-item-content">
+                      <p className="reservation-item-title">{book.title}</p>
+                      {book.subtitle ? <p className="reservation-item-meta">{book.subtitle}</p> : null}
+                      <p className="reservation-item-meta">
+                        {book.available_copies} of {book.total_copies} copies available
+                        {book.language ? ` | ${book.language}` : ""}
+                        {book.publication_year ? ` | ${book.publication_year}` : ""}
+                      </p>
+                    </div>
+                    <div className="reservation-item-actions">
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-small"
+                        disabled={isReserved || isActionLoading}
+                        onClick={() => {
+                          void handleReserveBook(book.id);
+                        }}
+                      >
+                        {isReserved ? "Already reserved" : isActionLoading ? "Saving..." : "Reserve"}
+                      </button>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </article>
 
-            {filteredBooks.length === 0 ? (
-              <p className="empty-state">No books match your search right now.</p>
-            ) : (
-              <ul className="reservation-list">
-                {filteredBooks.map((book) => {
-                  const isReserved = reservedBookIds.has(book.id);
-                  const isActionLoading = activeAction === `reserve-${book.id}`;
+        <article className="discover-section">
+          <header className="discover-section-head">
+            <h2>Your Active Reservations</h2>
+          </header>
 
-                  return (
-                    <li key={book.id} className="reservation-item">
-                      <div className="reservation-item-content">
-                        <p className="reservation-item-title">{book.title}</p>
-                        {book.subtitle ? <p className="reservation-item-meta">{book.subtitle}</p> : null}
-                        <p className="reservation-item-meta">
-                          {book.available_copies} of {book.total_copies} copies available
-                          {book.language ? ` | ${book.language}` : ""}
-                          {book.publication_year ? ` | ${book.publication_year}` : ""}
-                        </p>
+          {reservations.length === 0 ? (
+            <p className="empty-state">You have no active reservations yet.</p>
+          ) : (
+            <ul className="reservation-list">
+              {reservations.map((reservation) => {
+                const isActionLoading = activeAction === `cancel-${reservation.id}`;
+
+                return (
+                  <li key={reservation.id} className="reservation-item">
+                    <div className="reservation-item-content">
+                      <div className="reservation-item-head">
+                        <p className="reservation-item-title">{reservation.books?.title ?? "Unknown book"}</p>
+                        <span className={`status-pill status-${reservation.status}`}>
+                          {formatStatus(reservation.status)}
+                        </span>
                       </div>
-                      <div className="reservation-item-actions">
-                        <button
-                          type="button"
-                          className="btn btn-primary btn-small"
-                          disabled={isReserved || isActionLoading}
-                          onClick={() => {
-                            void handleReserveBook(book.id);
-                          }}
-                        >
-                          {isReserved ? "Already reserved" : isActionLoading ? "Saving..." : "Reserve"}
-                        </button>
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </article>
-
-          <article className="portal-panel portal-panel-secondary">
-            <header className="panel-heading">
-              <h2>Your Active Reservations</h2>
-              <p>Track pending requests and cancel when needed.</p>
-            </header>
-
-            {reservations.length === 0 ? (
-              <p className="empty-state">You have no active reservations yet.</p>
-            ) : (
-              <ul className="reservation-list">
-                {reservations.map((reservation) => {
-                  const isActionLoading = activeAction === `cancel-${reservation.id}`;
-
-                  return (
-                    <li key={reservation.id} className="reservation-item">
-                      <div className="reservation-item-content">
-                        <div className="reservation-item-head">
-                          <p className="reservation-item-title">
-                            {reservation.books?.title ?? "Unknown book"}
-                          </p>
-                          <span className={`status-pill status-${reservation.status}`}>
-                            {formatStatus(reservation.status)}
-                          </span>
-                        </div>
-                        {reservation.books?.subtitle ? (
-                          <p className="reservation-item-meta">{reservation.books.subtitle}</p>
-                        ) : null}
-                        <p className="reservation-item-meta">
-                          Requested: {formatDate(reservation.requested_at)}
-                        </p>
-                        {reservation.expires_at ? (
-                          <p className="reservation-item-meta">
-                            Expires: {formatDate(reservation.expires_at)}
-                          </p>
-                        ) : null}
-                      </div>
-                      <div className="reservation-item-actions">
-                        <button
-                          type="button"
-                          className="btn btn-soft btn-small"
-                          disabled={isActionLoading}
-                          onClick={() => {
-                            void handleCancelReservation(reservation.id);
-                          }}
-                        >
-                          {isActionLoading ? "Cancelling..." : "Cancel reservation"}
-                        </button>
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </article>
-        </section>
-      </div>
-    </main>
+                      {reservation.books?.subtitle ? (
+                        <p className="reservation-item-meta">{reservation.books.subtitle}</p>
+                      ) : null}
+                      <p className="reservation-item-meta">Requested: {formatDate(reservation.requested_at)}</p>
+                      {reservation.expires_at ? (
+                        <p className="reservation-item-meta">Expires: {formatDate(reservation.expires_at)}</p>
+                      ) : null}
+                    </div>
+                    <div className="reservation-item-actions">
+                      <button
+                        type="button"
+                        className="btn btn-soft btn-small"
+                        disabled={isActionLoading}
+                        onClick={() => {
+                          void handleCancelReservation(reservation.id);
+                        }}
+                      >
+                        {isActionLoading ? "Cancelling..." : "Cancel reservation"}
+                      </button>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </article>
+      </section>
+    </LibraryWorkspaceLayout>
   );
 }
+
 
