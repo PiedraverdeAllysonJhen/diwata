@@ -193,7 +193,7 @@ export default function DashboardPage() {
     <main className="portal-page">
       <div className="portal-shell">
         <header className="portal-topbar">
-          <button type="button" className="portal-brand" onClick={() => navigate("/dashboard")}> 
+          <button type="button" className="portal-brand" onClick={() => navigate("/dashboard")}>
             <img src="/assets/bookitstudent-logo.jpg" alt="BookItStudent logo" />
             <span>
               <strong>BookItStudent</strong>
@@ -202,7 +202,7 @@ export default function DashboardPage() {
           </button>
 
           <nav className="portal-nav" aria-label="Primary navigation">
-            <button type="button" className="portal-nav-item active" onClick={() => navigate("/dashboard")}> 
+            <button type="button" className="portal-nav-item active" onClick={() => navigate("/dashboard")}>
               Dashboard
             </button>
             <button
@@ -211,6 +211,9 @@ export default function DashboardPage() {
               onClick={() => navigate("/reservations")}
             >
               Reservations
+            </button>
+            <button type="button" className="portal-nav-item" onClick={() => navigate("/search")}>
+              Search
             </button>
           </nav>
 
@@ -229,8 +232,8 @@ export default function DashboardPage() {
             <p className="eyebrow">Learning Commons Portal</p>
             <h1>Student Dashboard</h1>
             <p>
-              Check your reservation progress, monitor available books, and jump directly to the
-              reservation workspace.
+              Check your reservation progress, search catalog categories, monitor available books,
+              and jump directly to your reservation workspace.
             </p>
             <div className="portal-hero-actions">
               <button
@@ -239,6 +242,9 @@ export default function DashboardPage() {
                 onClick={() => navigate("/reservations")}
               >
                 Open reservation workspace
+              </button>
+              <button type="button" className="btn btn-soft" onClick={() => navigate("/search")}>
+                Open book search
               </button>
               <button
                 type="button"
@@ -308,18 +314,18 @@ export default function DashboardPage() {
               <button
                 type="button"
                 className="quick-action"
-                onClick={() => navigate("/reservations")}
+                onClick={() => navigate("/search")}
               >
-                <strong>Reserve a Book</strong>
-                <span>Browse available titles and request copies.</span>
+                <strong>Search Catalog</strong>
+                <span>Filter by category, language, and availability.</span>
               </button>
               <button
                 type="button"
                 className="quick-action"
                 onClick={() => navigate("/reservations")}
               >
-                <strong>Manage Queue</strong>
-                <span>Cancel active reservations or track pickup readiness.</span>
+                <strong>Reserve a Book</strong>
+                <span>Browse available titles and request copies.</span>
               </button>
               <button
                 type="button"
