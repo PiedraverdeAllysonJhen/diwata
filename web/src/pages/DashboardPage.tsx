@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Session } from "@supabase/supabase-js";
 import { hasSupabaseEnv, supabase } from "../lib/supabase";
+import ReservationNotifier from "../components/ReservationNotifier";
+import { useReservationNotifier } from "../hooks/useReservationNotifier";
 
 type DashboardMetrics = {
   availableBooks: number;
@@ -238,6 +240,7 @@ export default function DashboardPage() {
   };
 
   const userEmail = session?.user.email ?? "student@vsu.edu.ph";
+  const notifier = useReservationNotifier(session?.user.id);
 
   if (!hasSupabaseEnv) {
     return (
@@ -293,6 +296,15 @@ export default function DashboardPage() {
           </nav>
 
           <div className="portal-user-controls">
+            <ReservationNotifier
+              notifications={notifier.notifications}
+              unreadCount={notifier.unreadCount}
+              isOpen={notifier.isOpen}
+              onToggle={notifier.toggleOpen}
+              onClose={notifier.close}
+              onMarkRead={notifier.markAsRead}
+              onMarkAllRead={notifier.markAllAsRead}
+            />
             <p className="portal-user-email" title={userEmail}>
               {userEmail}
             </p>
@@ -425,3 +437,5 @@ export default function DashboardPage() {
     </main>
   );
 }
+
+
