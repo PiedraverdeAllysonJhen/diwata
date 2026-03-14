@@ -5,15 +5,44 @@ import { hasSupabaseEnv, supabase } from "../lib/supabase";
 import PortalLiveIndicator from "../components/PortalLiveIndicator";
 import LibraryWorkspaceLayout from "../components/LibraryWorkspaceLayout";
 import { useReservationNotifier } from "../hooks/useReservationNotifier";
+import {
+  RawAuthorRelation,
+  formatAuthorLine,
+  formatPublicationLabel,
+  normalizeAuthors
+} from "../lib/bookMetadata";
 
 type BookRecord = {
   id: string;
+  isbn: string | null;
   title: string;
   subtitle: string | null;
+  description: string | null;
+  publisher: string | null;
+  language: string | null;
+  publication_year: number | null;
+  publication_date: string | null;
+  cover_image_url: string | null;
+  tags: string[] | null;
   available_copies: number;
   total_copies: number;
-  publication_year: number | null;
+  book_authors: RawAuthorRelation[] | null;
+};
+
+type ReservationBook = {
+  id: string;
+  isbn: string | null;
+  title: string;
+  subtitle: string | null;
+  publisher: string | null;
   language: string | null;
+  publication_year: number | null;
+  publication_date: string | null;
+  cover_image_url: string | null;
+  tags: string[] | null;
+  available_copies: number;
+  total_copies: number;
+  book_authors: RawAuthorRelation[] | null;
 };
 
 type ReservationStatus = "pending" | "ready_for_pickup";
@@ -24,10 +53,7 @@ type ReservationRecord = {
   status: ReservationStatus;
   requested_at: string;
   expires_at: string | null;
-  books: {
-    title: string;
-    subtitle: string | null;
-  } | null;
+  books: ReservationBook | ReservationBook[] | null;
 };
 
 type Notice = {
@@ -70,6 +96,27 @@ function formatLastSync(value: string | null) {
     minute: "2-digit",
     second: "2-digit"
   })}`;
+}
+
+function normalizeReservationBook(book: ReservationRecord["books"]): ReservationBook | null {
+  if (!book) return null;
+  return Array.isArray(book) ? book[0] ?? null : book;
+}
+
+function getBookMonogram(title: string): string {
+  const letters = title
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part.charAt(0).toUpperCase())
+    .join("");
+
+  return letters || "BK";
+}
+
+function getToneClass(seed: string): string {
+  const hash = Array.from(seed).reduce((acc, char) => acc + char.charCodeAt(0), 0);
+  return `tone-${(hash % 5) + 1}`;
 }
 
 export default function ReservationsPage() {
@@ -140,13 +187,17 @@ export default function ReservationsPage() {
       const [booksResult, reservationsResult] = await Promise.all([
         supabase
           .from("books")
-          .select("id,title,subtitle,available_copies,total_copies,publication_year,language")
+          .select(
+            "id,isbn,title,subtitle,description,publisher,language,publication_year,publication_date,cover_image_url,tags,available_copies,total_copies,book_authors(author_id,authors(id,name))"
+          )
           .gt("available_copies", 0)
           .order("title", { ascending: true })
           .limit(120),
         supabase
           .from("reservations")
-          .select("id,book_id,status,requested_at,expires_at,books(title,subtitle)")
+          .select(
+            "id,book_id,status,requested_at,expires_at,books(id,isbn,title,subtitle,publisher,language,publication_year,publication_date,cover_image_url,tags,available_copies,total_copies,book_authors(author_id,authors(id,name)))"
+          )
           .eq("user_id", session.user.id)
           .in("status", activeReservationStatuses)
           .order("requested_at", { ascending: false })
@@ -207,11 +258,9 @@ export default function ReservationsPage() {
 
     const channel = supabase
       .channel(`reservations-realtime-${session.user.id}`)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "books" },
-        queueLiveRefresh
-      )
+      .on("postgres_changes", { event: "*", schema: "public", table: "books" }, queueLiveRefresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "book_authors" }, queueLiveRefresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "authors" }, queueLiveRefresh)
       .on(
         "postgres_changes",
         {
@@ -245,7 +294,12 @@ export default function ReservationsPage() {
         book.title,
         book.subtitle ?? "",
         book.language ?? "",
-        book.publication_year ? String(book.publication_year) : ""
+        book.publication_year ? String(book.publication_year) : "",
+        book.publication_date ?? "",
+        book.isbn ?? "",
+        book.publisher ?? "",
+        (book.tags ?? []).join(" "),
+        normalizeAuthors(book.book_authors).join(" ")
       ];
 
       return values.some((value) => value.toLowerCase().includes(keyword));
@@ -424,13 +478,13 @@ export default function ReservationsPage() {
             type="search"
             value={searchQuery}
             onChange={(event) => setSearchQuery(event.target.value)}
-            placeholder="Type title, subtitle, language, or year"
+            placeholder="Type title, author, ISBN, language, or year"
           />
         </label>
         <p className="toolbar-hint">Showing {filteredBooks.length} matching books.</p>
       </section>
 
-      <section className="discover-grid-two">
+      <section className="discover-grid-two reservation-workspace-grid">
         <article className="discover-section">
           <header className="discover-section-head">
             <h2>Available Books</h2>
@@ -439,21 +493,39 @@ export default function ReservationsPage() {
           {filteredBooks.length === 0 ? (
             <p className="empty-state">No books match your search right now.</p>
           ) : (
-            <ul className="reservation-list">
+            <ul className="reservation-list reservation-list-available">
               {filteredBooks.map((book) => {
                 const isReserved = reservedBookIds.has(book.id);
                 const isActionLoading = activeAction === `reserve-${book.id}`;
+                const authors = normalizeAuthors(book.book_authors);
 
                 return (
                   <li key={book.id} className="reservation-item">
+                    <div
+                      className={`discover-result-cover ${getToneClass(book.id)} ${book.cover_image_url ? "has-image" : ""}`.trim()}
+                      style={
+                        book.cover_image_url
+                          ? {
+                              backgroundImage: `linear-gradient(165deg, rgba(7, 66, 52, 0.42), rgba(7, 66, 52, 0.08)), url(${book.cover_image_url})`
+                            }
+                          : undefined
+                      }
+                    >
+                      {!book.cover_image_url ? <span>{getBookMonogram(book.title)}</span> : null}
+                    </div>
                     <div className="reservation-item-content">
                       <p className="reservation-item-title">{book.title}</p>
-                      {book.subtitle ? <p className="reservation-item-meta">{book.subtitle}</p> : null}
-                      <p className="reservation-item-meta">
-                        {book.available_copies} of {book.total_copies} copies available
-                        {book.language ? ` | ${book.language}` : ""}
-                        {book.publication_year ? ` | ${book.publication_year}` : ""}
-                      </p>
+                      <div className="reservation-meta-grid">
+                        <p className="reservation-item-meta"><strong>Author:</strong> {formatAuthorLine(authors)}</p>
+                        <p className="reservation-item-meta"><strong>Publish date:</strong> {formatPublicationLabel(book.publication_date, book.publication_year)}</p>
+                        <p className="reservation-item-meta"><strong>ISBN:</strong> {book.isbn ?? "N/A"}</p>
+                        <p className="reservation-item-meta"><strong>Subtitle:</strong> {book.subtitle ?? "N/A"}</p>
+                        <p className="reservation-item-meta"><strong>Publisher:</strong> {book.publisher ?? "N/A"}</p>
+                        <p className="reservation-item-meta"><strong>Language:</strong> {book.language ?? "N/A"}</p>
+                        <p className="reservation-item-meta"><strong>Copies:</strong> {book.available_copies} available / {book.total_copies} total</p>
+                        <p className="reservation-item-meta"><strong>Tags:</strong> {(book.tags ?? []).length > 0 ? (book.tags ?? []).join(", ") : "None"}</p>
+                      </div>
+                      <p className="reservation-item-meta reservation-description"><strong>Description:</strong> {book.description ?? "No description provided."}</p>
                     </div>
                     <div className="reservation-item-actions">
                       <button
@@ -482,26 +554,45 @@ export default function ReservationsPage() {
           {reservations.length === 0 ? (
             <p className="empty-state">You have no active reservations yet.</p>
           ) : (
-            <ul className="reservation-list">
+            <ul className="reservation-list reservation-list-active">
               {reservations.map((reservation) => {
                 const isActionLoading = activeAction === `cancel-${reservation.id}`;
+                const reservationBook = normalizeReservationBook(reservation.books);
+                const authors = normalizeAuthors(reservationBook?.book_authors ?? null);
 
                 return (
                   <li key={reservation.id} className="reservation-item">
+                    <div
+                      className={`discover-result-cover ${getToneClass(reservationBook?.id ?? reservation.id)} ${reservationBook?.cover_image_url ? "has-image" : ""}`.trim()}
+                      style={
+                        reservationBook?.cover_image_url
+                          ? {
+                              backgroundImage: `linear-gradient(165deg, rgba(7, 66, 52, 0.42), rgba(7, 66, 52, 0.08)), url(${reservationBook.cover_image_url})`
+                            }
+                          : undefined
+                      }
+                    >
+                      {!reservationBook?.cover_image_url ? <span>{getBookMonogram(reservationBook?.title ?? "Book")}</span> : null}
+                    </div>
                     <div className="reservation-item-content">
                       <div className="reservation-item-head">
-                        <p className="reservation-item-title">{reservation.books?.title ?? "Unknown book"}</p>
+                        <p className="reservation-item-title">{reservationBook?.title ?? "Unknown book"}</p>
                         <span className={`status-pill status-${reservation.status}`}>
                           {formatStatus(reservation.status)}
                         </span>
                       </div>
-                      {reservation.books?.subtitle ? (
-                        <p className="reservation-item-meta">{reservation.books.subtitle}</p>
-                      ) : null}
-                      <p className="reservation-item-meta">Requested: {formatDate(reservation.requested_at)}</p>
-                      {reservation.expires_at ? (
-                        <p className="reservation-item-meta">Expires: {formatDate(reservation.expires_at)}</p>
-                      ) : null}
+                      <div className="reservation-meta-grid">
+                        <p className="reservation-item-meta"><strong>Author:</strong> {formatAuthorLine(authors)}</p>
+                        <p className="reservation-item-meta"><strong>Publish date:</strong> {formatPublicationLabel(reservationBook?.publication_date, reservationBook?.publication_year)}</p>
+                        <p className="reservation-item-meta"><strong>ISBN:</strong> {reservationBook?.isbn ?? "N/A"}</p>
+                        <p className="reservation-item-meta"><strong>Subtitle:</strong> {reservationBook?.subtitle ?? "N/A"}</p>
+                        <p className="reservation-item-meta"><strong>Publisher:</strong> {reservationBook?.publisher ?? "N/A"}</p>
+                        <p className="reservation-item-meta"><strong>Language:</strong> {reservationBook?.language ?? "N/A"}</p>
+                        <p className="reservation-item-meta"><strong>Copies:</strong> {reservationBook?.available_copies ?? 0} available / {reservationBook?.total_copies ?? 0} total</p>
+                        <p className="reservation-item-meta"><strong>Tags:</strong> {(reservationBook?.tags ?? []).length > 0 ? (reservationBook?.tags ?? []).join(", ") : "None"}</p>
+                        <p className="reservation-item-meta"><strong>Requested:</strong> {formatDate(reservation.requested_at)}</p>
+                        <p className="reservation-item-meta"><strong>Expires:</strong> {reservation.expires_at ? formatDate(reservation.expires_at) : "No expiry"}</p>
+                      </div>
                     </div>
                     <div className="reservation-item-actions">
                       <button
@@ -525,5 +616,12 @@ export default function ReservationsPage() {
     </LibraryWorkspaceLayout>
   );
 }
+
+
+
+
+
+
+
 
 

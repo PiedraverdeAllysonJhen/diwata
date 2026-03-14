@@ -5,6 +5,12 @@ import { hasSupabaseEnv, supabase } from "../lib/supabase";
 import PortalLiveIndicator from "../components/PortalLiveIndicator";
 import LibraryWorkspaceLayout from "../components/LibraryWorkspaceLayout";
 import { useReservationNotifier } from "../hooks/useReservationNotifier";
+import {
+  RawAuthorRelation,
+  formatAuthorLine,
+  formatPublicationLabel,
+  normalizeAuthors
+} from "../lib/bookMetadata";
 
 type RawCategoryRelation = {
   category_id: string;
@@ -13,30 +19,38 @@ type RawCategoryRelation = {
 
 type RawBookRecord = {
   id: string;
+  isbn: string | null;
   title: string;
   subtitle: string | null;
   description: string | null;
   publisher: string | null;
   language: string | null;
   publication_year: number | null;
+  publication_date: string | null;
   cover_image_url: string | null;
   available_copies: number;
   total_copies: number;
+  tags: string[] | null;
   book_categories: RawCategoryRelation[] | null;
+  book_authors: RawAuthorRelation[] | null;
 };
 
 type BookRecord = {
   id: string;
+  isbn: string | null;
   title: string;
   subtitle: string | null;
   description: string | null;
   publisher: string | null;
   language: string | null;
   publicationYear: number | null;
+  publicationDate: string | null;
   coverImageUrl: string | null;
   availableCopies: number;
   totalCopies: number;
+  tags: string[];
   categories: string[];
+  authors: string[];
 };
 
 type CategoryRow = {
@@ -78,16 +92,20 @@ function normalizeCategories(relations: RawCategoryRelation[] | null): string[] 
 function normalizeBook(record: RawBookRecord): BookRecord {
   return {
     id: record.id,
+    isbn: record.isbn,
     title: record.title,
     subtitle: record.subtitle,
     description: record.description,
     publisher: record.publisher,
     language: record.language,
     publicationYear: record.publication_year,
+    publicationDate: record.publication_date,
     coverImageUrl: record.cover_image_url,
     availableCopies: record.available_copies,
     totalCopies: record.total_copies,
-    categories: normalizeCategories(record.book_categories)
+    tags: record.tags ?? [],
+    categories: normalizeCategories(record.book_categories),
+    authors: normalizeAuthors(record.book_authors)
   };
 }
 
@@ -197,7 +215,7 @@ export default function CategoryPage() {
       supabase
         .from("books")
         .select(
-          "id,title,subtitle,description,publisher,language,publication_year,cover_image_url,available_copies,total_copies,book_categories(category_id,categories(id,name))"
+          "id,isbn,title,subtitle,description,publisher,language,publication_year,publication_date,cover_image_url,available_copies,total_copies,tags,book_categories(category_id,categories(id,name)),book_authors(author_id,authors(id,name))"
         )
         .order("title", { ascending: true })
         .limit(300),
@@ -259,12 +277,10 @@ export default function CategoryPage() {
     const channel = supabase
       .channel(`category-realtime-${session.user.id}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "books" }, queueLiveRefresh)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "book_categories" },
-        queueLiveRefresh
-      )
+      .on("postgres_changes", { event: "*", schema: "public", table: "book_categories" }, queueLiveRefresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "book_authors" }, queueLiveRefresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "categories" }, queueLiveRefresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "authors" }, queueLiveRefresh)
       .subscribe();
 
     return () => {
@@ -391,11 +407,7 @@ export default function CategoryPage() {
           <button type="button" className="btn btn-soft btn-small" onClick={() => navigate("/search")}>
             Open Discover
           </button>
-          <button
-            type="button"
-            className="btn btn-soft btn-small"
-            onClick={() => navigate("/reservations")}
-          >
+          <button type="button" className="btn btn-soft btn-small" onClick={() => navigate("/reservations")}>
             Open Reservations
           </button>
         </div>
@@ -413,11 +425,7 @@ export default function CategoryPage() {
       <section className="discover-section" aria-label="Category overview">
         <header className="discover-section-head">
           <h2>Category Collection</h2>
-          <button
-            type="button"
-            className="discover-view-link"
-            onClick={() => setSelectedCategory("all")}
-          >
+          <button type="button" className="discover-view-link" onClick={() => setSelectedCategory("all")}>
             Show all
           </button>
         </header>
@@ -435,9 +443,6 @@ export default function CategoryPage() {
                   className={`discover-category-card ${active ? "active" : ""}`.trim()}
                   onClick={() => setSelectedCategory(active ? "all" : entry.name)}
                 >
-                  <div className={`discover-mini-cover ${getToneClass(entry.id)}`.trim()}>
-                    <span>{getBookMonogram(entry.name)}</span>
-                  </div>
                   <strong>{entry.name}</strong>
                   <span>
                     {entry.count} titles | {entry.availableCount} available
@@ -451,9 +456,7 @@ export default function CategoryPage() {
 
       <section className="discover-section" aria-label="Books in selected category">
         <header className="discover-section-head">
-          <h2>
-            {selectedCategory === "all" ? "All Catalog Titles" : `${selectedCategory} Titles`}
-          </h2>
+          <h2>{selectedCategory === "all" ? "All Catalog Titles" : `${selectedCategory} Titles`}</h2>
           <p className="discover-inline-meta">{filteredBooks.length} books</p>
         </header>
 
@@ -466,7 +469,7 @@ export default function CategoryPage() {
               return (
                 <article key={book.id} className="discover-result-card">
                   <div
-                    className={`discover-mini-cover ${getToneClass(book.id)} ${book.coverImageUrl ? "has-image" : ""}`.trim()}
+                    className={`discover-result-cover ${getToneClass(book.id)} ${book.coverImageUrl ? "has-image" : ""}`.trim()}
                     style={
                       book.coverImageUrl
                         ? {
@@ -486,15 +489,20 @@ export default function CategoryPage() {
                       </span>
                     </div>
 
-                    <p className="discover-result-meta">
-                      {book.availableCopies} of {book.totalCopies} copies available
-                      {book.language ? ` | ${book.language}` : ""}
-                      {book.publicationYear ? ` | ${book.publicationYear}` : ""}
-                    </p>
+                    <div className="discover-book-meta-grid">
+                      <p className="discover-result-meta"><strong>Author:</strong> {formatAuthorLine(book.authors)}</p>
+                      <p className="discover-result-meta"><strong>Publish date:</strong> {formatPublicationLabel(book.publicationDate, book.publicationYear)}</p>
+                      <p className="discover-result-meta"><strong>ISBN:</strong> {book.isbn ?? "N/A"}</p>
+                      <p className="discover-result-meta"><strong>Publisher:</strong> {book.publisher ?? "N/A"}</p>
+                      <p className="discover-result-meta"><strong>Language:</strong> {book.language ?? "N/A"}</p>
+                      <p className="discover-result-meta"><strong>Copies:</strong> {book.availableCopies} available / {book.totalCopies} total</p>
+                      <p className="discover-result-meta"><strong>Subtitle:</strong> {book.subtitle ?? "N/A"}</p>
+                      <p className="discover-result-meta"><strong>Tags:</strong> {book.tags.length > 0 ? book.tags.join(", ") : "None"}</p>
+                    </div>
 
-                    {book.description ? (
-                      <p className="discover-result-description">{book.description}</p>
-                    ) : null}
+                    <p className="discover-result-description">
+                      <strong>Description:</strong> {book.description ?? "No description provided."}
+                    </p>
 
                     <div className="discover-result-actions">
                       <button
@@ -516,3 +524,4 @@ export default function CategoryPage() {
     </LibraryWorkspaceLayout>
   );
 }
+
