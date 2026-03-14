@@ -20,6 +20,8 @@ type RecentReservation = {
   } | null;
 };
 
+type LoadSource = "manual" | "live";
+
 const activeReservationStatuses = ["pending", "ready_for_pickup"];
 
 function formatDate(value: string) {
@@ -42,11 +44,26 @@ function formatStatus(status: string) {
     .join(" ");
 }
 
+function formatLastSync(value: string | null) {
+  if (!value) return "Waiting for first sync";
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Waiting for first sync";
+
+  return `Last sync ${date.toLocaleTimeString(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit"
+  })}`;
+}
+
 export default function DashboardPage() {
   const navigate = useNavigate();
   const [session, setSession] = useState<Session | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isDataLoading, setIsDataLoading] = useState(false);
+  const [isLiveSyncing, setIsLiveSyncing] = useState(false);
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [dataError, setDataError] = useState("");
   const [metrics, setMetrics] = useState<DashboardMetrics>({
     availableBooks: 0,
@@ -98,63 +115,121 @@ export default function DashboardPage() {
     };
   }, [navigate]);
 
-  const loadDashboardData = useCallback(async () => {
-    if (!session?.user.id) return;
+  const loadDashboardData = useCallback(
+    async (source: LoadSource = "manual") => {
+      if (!session?.user.id) return;
 
-    setIsDataLoading(true);
+      if (source === "manual") {
+        setIsDataLoading(true);
+      } else {
+        setIsLiveSyncing(true);
+      }
 
-    const [availableBooksResult, activeResult, readyResult, totalResult, recentResult] =
-      await Promise.all([
-        supabase.from("books").select("id", { count: "exact", head: true }).gt("available_copies", 0),
-        supabase
-          .from("reservations")
-          .select("id", { count: "exact", head: true })
-          .eq("user_id", session.user.id)
-          .in("status", activeReservationStatuses),
-        supabase
-          .from("reservations")
-          .select("id", { count: "exact", head: true })
-          .eq("user_id", session.user.id)
-          .eq("status", "ready_for_pickup"),
-        supabase
-          .from("reservations")
-          .select("id", { count: "exact", head: true })
-          .eq("user_id", session.user.id),
-        supabase
-          .from("reservations")
-          .select("id,status,requested_at,books(title,subtitle)")
-          .eq("user_id", session.user.id)
-          .order("requested_at", { ascending: false })
-          .limit(5)
-      ]);
+      const [availableBooksResult, activeResult, readyResult, totalResult, recentResult] =
+        await Promise.all([
+          supabase
+            .from("books")
+            .select("id", { count: "exact", head: true })
+            .gt("available_copies", 0),
+          supabase
+            .from("reservations")
+            .select("id", { count: "exact", head: true })
+            .eq("user_id", session.user.id)
+            .in("status", activeReservationStatuses),
+          supabase
+            .from("reservations")
+            .select("id", { count: "exact", head: true })
+            .eq("user_id", session.user.id)
+            .eq("status", "ready_for_pickup"),
+          supabase
+            .from("reservations")
+            .select("id", { count: "exact", head: true })
+            .eq("user_id", session.user.id),
+          supabase
+            .from("reservations")
+            .select("id,status,requested_at,books(title,subtitle)")
+            .eq("user_id", session.user.id)
+            .order("requested_at", { ascending: false })
+            .limit(5)
+        ]);
 
-    const firstError =
-      availableBooksResult.error ??
-      activeResult.error ??
-      readyResult.error ??
-      totalResult.error ??
-      recentResult.error;
+      const firstError =
+        availableBooksResult.error ??
+        activeResult.error ??
+        readyResult.error ??
+        totalResult.error ??
+        recentResult.error;
 
-    if (firstError) {
-      setDataError(firstError.message);
-    } else {
-      setDataError("");
-    }
+      if (firstError) {
+        setDataError(firstError.message);
+      } else {
+        setDataError("");
+      }
 
-    setMetrics({
-      availableBooks: availableBooksResult.count ?? 0,
-      activeReservations: activeResult.count ?? 0,
-      readyForPickup: readyResult.count ?? 0,
-      totalRequests: totalResult.count ?? 0
-    });
+      setMetrics({
+        availableBooks: availableBooksResult.count ?? 0,
+        activeReservations: activeResult.count ?? 0,
+        readyForPickup: readyResult.count ?? 0,
+        totalRequests: totalResult.count ?? 0
+      });
 
-    setRecentReservations((recentResult.data ?? []) as RecentReservation[]);
-    setIsDataLoading(false);
-  }, [session?.user.id]);
+      setRecentReservations((recentResult.data ?? []) as RecentReservation[]);
+      setLastSyncedAt(new Date().toISOString());
+
+      if (source === "manual") {
+        setIsDataLoading(false);
+      } else {
+        setIsLiveSyncing(false);
+      }
+    },
+    [session?.user.id]
+  );
 
   useEffect(() => {
     if (!session?.user.id) return;
-    void loadDashboardData();
+    void loadDashboardData("manual");
+  }, [session?.user.id, loadDashboardData]);
+
+  useEffect(() => {
+    if (!session?.user.id || !hasSupabaseEnv) return;
+
+    let refreshTimeout: ReturnType<typeof setTimeout> | null = null;
+
+    const queueLiveRefresh = () => {
+      if (refreshTimeout) {
+        window.clearTimeout(refreshTimeout);
+      }
+
+      refreshTimeout = window.setTimeout(() => {
+        void loadDashboardData("live");
+      }, 320);
+    };
+
+    const channel = supabase
+      .channel(`dashboard-realtime-${session.user.id}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "books" },
+        queueLiveRefresh
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "reservations",
+          filter: `user_id=eq.${session.user.id}`
+        },
+        queueLiveRefresh
+      )
+      .subscribe();
+
+    return () => {
+      if (refreshTimeout) {
+        window.clearTimeout(refreshTimeout);
+      }
+      void supabase.removeChannel(channel);
+    };
   }, [session?.user.id, loadDashboardData]);
 
   const handleSignOut = async () => {
@@ -250,13 +325,19 @@ export default function DashboardPage() {
                 type="button"
                 className="btn btn-soft"
                 onClick={() => {
-                  void loadDashboardData();
+                  void loadDashboardData("manual");
                 }}
                 disabled={isDataLoading}
               >
                 {isDataLoading ? "Refreshing..." : "Refresh data"}
               </button>
             </div>
+
+            <p className={`live-indicator ${isLiveSyncing ? "syncing" : ""}`}>
+              <span className="live-dot" aria-hidden="true" />
+              {isLiveSyncing ? "Syncing live updates..." : "Live availability active"} | {formatLastSync(lastSyncedAt)}
+            </p>
+
             {dataError ? <p className="status error portal-notice">{dataError}</p> : null}
           </div>
 
@@ -331,7 +412,7 @@ export default function DashboardPage() {
                 type="button"
                 className="quick-action"
                 onClick={() => {
-                  void loadDashboardData();
+                  void loadDashboardData("manual");
                 }}
               >
                 <strong>Sync Data</strong>

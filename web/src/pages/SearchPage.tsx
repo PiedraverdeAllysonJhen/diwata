@@ -41,6 +41,7 @@ type CategoryRow = {
 };
 
 type FilterAvailability = "all" | "available" | "low_stock" | "out_of_stock";
+type LoadSource = "manual" | "live";
 
 type CategoryCount = {
   name: string;
@@ -103,11 +104,26 @@ function matchesAvailability(filter: FilterAvailability, status: Exclude<FilterA
   return filter === status;
 }
 
+function formatLastSync(value: string | null) {
+  if (!value) return "Waiting for first sync";
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Waiting for first sync";
+
+  return `Last sync ${date.toLocaleTimeString(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit"
+  })}`;
+}
+
 export default function SearchPage() {
   const navigate = useNavigate();
   const [session, setSession] = useState<Session | null>(null);
   const [isBootstrapping, setIsBootstrapping] = useState(true);
   const [isFetching, setIsFetching] = useState(false);
+  const [isLiveSyncing, setIsLiveSyncing] = useState(false);
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
   const [books, setBooks] = useState<SearchBook[]>([]);
   const [allCategories, setAllCategories] = useState<string[]>([]);
@@ -158,8 +174,12 @@ export default function SearchPage() {
     };
   }, [navigate]);
 
-  const loadCatalog = useCallback(async () => {
-    setIsFetching(true);
+  const loadCatalog = useCallback(async (source: LoadSource = "manual") => {
+    if (source === "manual") {
+      setIsFetching(true);
+    } else {
+      setIsLiveSyncing(true);
+    }
 
     const [booksResult, categoriesResult] = await Promise.all([
       supabase
@@ -174,13 +194,21 @@ export default function SearchPage() {
 
     if (booksResult.error) {
       setNotice(booksResult.error.message);
-      setIsFetching(false);
+      if (source === "manual") {
+        setIsFetching(false);
+      } else {
+        setIsLiveSyncing(false);
+      }
       return;
     }
 
     if (categoriesResult.error) {
       setNotice(categoriesResult.error.message);
-      setIsFetching(false);
+      if (source === "manual") {
+        setIsFetching(false);
+      } else {
+        setIsLiveSyncing(false);
+      }
       return;
     }
 
@@ -201,12 +229,65 @@ export default function SearchPage() {
 
     setAllCategories(Array.from(categoryNames).sort((a, b) => a.localeCompare(b)));
     setNotice("");
-    setIsFetching(false);
+    setLastSyncedAt(new Date().toISOString());
+
+    if (source === "manual") {
+      setIsFetching(false);
+    } else {
+      setIsLiveSyncing(false);
+    }
   }, []);
 
   useEffect(() => {
     if (!session?.user.id) return;
-    void loadCatalog();
+    void loadCatalog("manual");
+  }, [session?.user.id, loadCatalog]);
+
+  useEffect(() => {
+    if (!session?.user.id || !hasSupabaseEnv) return;
+
+    let refreshTimeout: ReturnType<typeof setTimeout> | null = null;
+
+    const queueLiveRefresh = () => {
+      if (refreshTimeout) {
+        window.clearTimeout(refreshTimeout);
+      }
+
+      refreshTimeout = window.setTimeout(() => {
+        void loadCatalog("live");
+      }, 320);
+    };
+
+    const channel = supabase
+      .channel(`search-realtime-${session.user.id}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "books" },
+        queueLiveRefresh
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "book_copies" },
+        queueLiveRefresh
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "book_categories" },
+        queueLiveRefresh
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "categories" },
+        queueLiveRefresh
+      )
+      .subscribe();
+
+    return () => {
+      if (refreshTimeout) {
+        window.clearTimeout(refreshTimeout);
+      }
+      void supabase.removeChannel(channel);
+    };
   }, [session?.user.id, loadCatalog]);
 
   const allLanguages = useMemo(() => {
@@ -369,7 +450,7 @@ export default function SearchPage() {
               type="button"
               className="btn btn-soft"
               onClick={() => {
-                void loadCatalog();
+                void loadCatalog("manual");
               }}
               disabled={isFetching}
             >
@@ -382,6 +463,11 @@ export default function SearchPage() {
             ) : null}
           </div>
         </section>
+
+        <p className={`live-indicator ${isLiveSyncing ? "syncing" : ""}`}>
+          <span className="live-dot" aria-hidden="true" />
+          {isLiveSyncing ? "Syncing live updates..." : "Live availability active"} | {formatLastSync(lastSyncedAt)}
+        </p>
 
         {notice ? <p className="status error portal-notice">{notice}</p> : null}
 
@@ -543,3 +629,4 @@ export default function SearchPage() {
     </main>
   );
 }
+

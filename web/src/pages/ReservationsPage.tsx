@@ -32,6 +32,8 @@ type Notice = {
   text: string;
 };
 
+type LoadSource = "manual" | "live";
+
 const activeReservationStatuses: ReservationStatus[] = ["pending", "ready_for_pickup"];
 
 function formatDate(dateValue: string | null) {
@@ -54,11 +56,26 @@ function formatStatus(status: string) {
     .join(" ");
 }
 
+function formatLastSync(value: string | null) {
+  if (!value) return "Waiting for first sync";
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Waiting for first sync";
+
+  return `Last sync ${date.toLocaleTimeString(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit"
+  })}`;
+}
+
 export default function ReservationsPage() {
   const navigate = useNavigate();
   const [session, setSession] = useState<Session | null>(null);
   const [isBootstrapping, setIsBootstrapping] = useState(true);
   const [isFetching, setIsFetching] = useState(false);
+  const [isLiveSyncing, setIsLiveSyncing] = useState(false);
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [activeAction, setActiveAction] = useState<string | null>(null);
   const [books, setBooks] = useState<BookRecord[]>([]);
   const [reservations, setReservations] = useState<ReservationRecord[]>([]);
@@ -107,50 +124,109 @@ export default function ReservationsPage() {
     };
   }, [navigate]);
 
-  const loadReservationData = useCallback(async () => {
-    if (!session?.user.id) return;
+  const loadReservationData = useCallback(
+    async (source: LoadSource = "manual") => {
+      if (!session?.user.id) return;
 
-    setIsFetching(true);
+      if (source === "manual") {
+        setIsFetching(true);
+      } else {
+        setIsLiveSyncing(true);
+      }
 
-    const [booksResult, reservationsResult] = await Promise.all([
-      supabase
-        .from("books")
-        .select("id,title,subtitle,available_copies,total_copies,publication_year,language")
-        .gt("available_copies", 0)
-        .order("title", { ascending: true })
-        .limit(120),
-      supabase
-        .from("reservations")
-        .select("id,book_id,status,requested_at,expires_at,books(title,subtitle)")
-        .eq("user_id", session.user.id)
-        .in("status", activeReservationStatuses)
-        .order("requested_at", { ascending: false })
-    ]);
+      const [booksResult, reservationsResult] = await Promise.all([
+        supabase
+          .from("books")
+          .select("id,title,subtitle,available_copies,total_copies,publication_year,language")
+          .gt("available_copies", 0)
+          .order("title", { ascending: true })
+          .limit(120),
+        supabase
+          .from("reservations")
+          .select("id,book_id,status,requested_at,expires_at,books(title,subtitle)")
+          .eq("user_id", session.user.id)
+          .in("status", activeReservationStatuses)
+          .order("requested_at", { ascending: false })
+      ]);
 
-    if (booksResult.error) {
-      setNotice({
-        type: "error",
-        text: booksResult.error.message
-      });
-    } else {
-      setBooks((booksResult.data ?? []) as BookRecord[]);
-    }
+      if (booksResult.error) {
+        setNotice({
+          type: "error",
+          text: booksResult.error.message
+        });
+      } else {
+        setBooks((booksResult.data ?? []) as BookRecord[]);
+      }
 
-    if (reservationsResult.error) {
-      setNotice({
-        type: "error",
-        text: reservationsResult.error.message
-      });
-    } else {
-      setReservations((reservationsResult.data ?? []) as ReservationRecord[]);
-    }
+      if (reservationsResult.error) {
+        setNotice({
+          type: "error",
+          text: reservationsResult.error.message
+        });
+      } else {
+        setReservations((reservationsResult.data ?? []) as ReservationRecord[]);
+      }
 
-    setIsFetching(false);
-  }, [session?.user.id]);
+      if (!booksResult.error && !reservationsResult.error) {
+        setNotice(null);
+      }
+
+      setLastSyncedAt(new Date().toISOString());
+
+      if (source === "manual") {
+        setIsFetching(false);
+      } else {
+        setIsLiveSyncing(false);
+      }
+    },
+    [session?.user.id]
+  );
 
   useEffect(() => {
     if (!session?.user.id) return;
-    void loadReservationData();
+    void loadReservationData("manual");
+  }, [session?.user.id, loadReservationData]);
+
+  useEffect(() => {
+    if (!session?.user.id || !hasSupabaseEnv) return;
+
+    let refreshTimeout: ReturnType<typeof setTimeout> | null = null;
+
+    const queueLiveRefresh = () => {
+      if (refreshTimeout) {
+        window.clearTimeout(refreshTimeout);
+      }
+
+      refreshTimeout = window.setTimeout(() => {
+        void loadReservationData("live");
+      }, 320);
+    };
+
+    const channel = supabase
+      .channel(`reservations-realtime-${session.user.id}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "books" },
+        queueLiveRefresh
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "reservations",
+          filter: `user_id=eq.${session.user.id}`
+        },
+        queueLiveRefresh
+      )
+      .subscribe();
+
+    return () => {
+      if (refreshTimeout) {
+        window.clearTimeout(refreshTimeout);
+      }
+      void supabase.removeChannel(channel);
+    };
   }, [session?.user.id, loadReservationData]);
 
   const reservedBookIds = useMemo(() => {
@@ -205,7 +281,7 @@ export default function ReservationsPage() {
       type: "success",
       text: "Reservation created successfully."
     });
-    await loadReservationData();
+    await loadReservationData("live");
     setActiveAction(null);
   };
 
@@ -238,7 +314,7 @@ export default function ReservationsPage() {
       type: "success",
       text: "Reservation cancelled successfully."
     });
-    await loadReservationData();
+    await loadReservationData("live");
     setActiveAction(null);
   };
 
@@ -323,7 +399,7 @@ export default function ReservationsPage() {
               type="button"
               className="btn btn-soft"
               onClick={() => {
-                void loadReservationData();
+                void loadReservationData("manual");
               }}
               disabled={isFetching}
             >
@@ -334,6 +410,11 @@ export default function ReservationsPage() {
             </button>
           </div>
         </section>
+
+        <p className={`live-indicator ${isLiveSyncing ? "syncing" : ""}`}>
+          <span className="live-dot" aria-hidden="true" />
+          {isLiveSyncing ? "Syncing live updates..." : "Live availability active"} | {formatLastSync(lastSyncedAt)}
+        </p>
 
         {notice ? <p className={`status ${notice.type} portal-notice`}>{notice.text}</p> : null}
 
