@@ -2348,3 +2348,157 @@ input {
     transform: scale(1);
   }
 }
+
+/* Reservation notifier v1 */
+.notifier {
+  position: relative;
+}
+
+.notifier-toggle {
+  border: 1px solid rgba(135, 210, 155, 0.84);
+  background: rgba(244, 251, 246, 0.95);
+  color: var(--forest-800);
+  border-radius: 999px;
+  height: 38px;
+  padding: 0 0.68rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.16s ease, box-shadow 0.16s ease;
+}
+
+.notifier-toggle:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 9px 20px rgba(8, 83, 58, 0.14);
+}
+
+.notifier-toggle svg {
+  width: 1.05rem;
+  height: 1.05rem;
+}
+
+.notifier-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.1rem;
+  height: 1.1rem;
+  padding: 0 0.24rem;
+  border-radius: 999px;
+  background: #d93e3e;
+  color: #fff;
+  font-size: 0.66rem;
+  line-height: 1;
+}
+
+.notifier-panel {
+  position: absolute;
+  top: calc(100% + 0.45rem);
+  right: 0;
+  width: min(350px, 92vw);
+  border-radius: 14px;
+  border: 1px solid rgba(136, 210, 157, 0.86);
+  background: #fff;
+  box-shadow: 0 18px 38px rgba(8, 83, 58, 0.2);
+  padding: 0.72rem;
+  z-index: 35;
+}
+
+.notifier-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.notifier-header h3 {
+  margin: 0;
+  font-size: 0.9rem;
+  font-family: "Poppins", "Segoe UI", sans-serif;
+  color: var(--forest-900);
+}
+
+.notifier-link {
+  border: none;
+  background: transparent;
+  color: var(--forest-700);
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.notifier-empty {
+  margin: 0;
+  border-radius: 10px;
+  border: 1px dashed rgba(133, 205, 152, 0.74);
+  background: rgba(248, 253, 249, 0.95);
+  color: var(--text-muted);
+  padding: 0.62rem;
+  font-size: 0.8rem;
+}
+
+.notifier-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.45rem;
+  max-height: min(360px, 56vh);
+  overflow-y: auto;
+}
+
+.notifier-item {
+  width: 100%;
+  border: 1px solid rgba(137, 209, 156, 0.72);
+  background: #fff;
+  border-radius: 10px;
+  padding: 0.55rem;
+  text-align: left;
+  display: grid;
+  gap: 0.2rem;
+  cursor: pointer;
+}
+
+.notifier-item.unread {
+  background: rgba(236, 250, 240, 0.95);
+  border-color: rgba(95, 191, 124, 0.88);
+}
+
+.notifier-item-title {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--forest-900);
+}
+
+.notifier-item-message {
+  font-size: 0.76rem;
+  line-height: 1.35;
+  color: var(--text-muted);
+}
+
+.notifier-item-time {
+  font-size: 0.72rem;
+  color: #5f8678;
+}
+
+@media (max-width: 760px) {
+  .notifier,
+  .notifier-toggle {
+    width: 100%;
+  }
+
+  .notifier-toggle {
+    justify-content: center;
+  }
+
+  .notifier-panel {
+    width: 100%;
+  }
+}
