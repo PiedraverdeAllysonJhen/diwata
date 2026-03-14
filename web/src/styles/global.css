@@ -2334,13 +2334,13 @@ input {
   color: #0d6648;
 }
 
-.availability-pill.low_stock {
+.availability-pill.borrowed {
   background: rgba(255, 245, 217, 0.98);
   border-color: rgba(207, 153, 47, 0.72);
   color: #885d11;
 }
 
-.availability-pill.out_of_stock {
+.availability-pill.reserved {
   background: rgba(255, 230, 230, 0.96);
   border-color: rgba(207, 93, 93, 0.75);
   color: #9f2424;
@@ -4272,3 +4272,5 @@ input {
     justify-self: start;
   }
 }
+
+
