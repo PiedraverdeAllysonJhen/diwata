@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { KeyboardEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { Session } from "@supabase/supabase-js";
 import { useNavigate } from "react-router-dom";
 import { hasSupabaseEnv, supabase } from "../lib/supabase";
@@ -72,6 +72,11 @@ type CategoryCount = {
   name: string;
   count: number;
   availableCount: number;
+};
+type ActiveReservation = {
+  id: string;
+  book_id: string;
+  status: "pending" | "ready_for_pickup";
 };
 
 function normalizeCategories(relations: RawCategoryRelation[] | null): string[] {
@@ -188,6 +193,13 @@ function getToneClass(seed: string): string {
   return `tone-${(hash % 5) + 1}`;
 }
 
+function onCardKeyDown(event: KeyboardEvent<HTMLElement>, onActivate: () => void) {
+  if (event.key === "Enter" || event.key === " ") {
+    event.preventDefault();
+    onActivate();
+  }
+}
+
 export default function CategoryPage() {
   const navigate = useNavigate();
   const [session, setSession] = useState<Session | null>(null);
@@ -199,6 +211,8 @@ export default function CategoryPage() {
   const [books, setBooks] = useState<BookRecord[]>([]);
   const [categories, setCategories] = useState<CategoryRow[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
+  const [reservedBookIds, setReservedBookIds] = useState<Set<string>>(new Set());
+  const [activeReserveBookId, setActiveReserveBookId] = useState<string | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -249,7 +263,7 @@ export default function CategoryPage() {
       setIsLiveSyncing(true);
     }
 
-    const [booksResult, categoriesResult] = await Promise.all([
+    const [booksResult, categoriesResult, reservationsResult] = await Promise.all([
       supabase
         .from("books")
         .select(
@@ -257,7 +271,12 @@ export default function CategoryPage() {
         )
         .order("title", { ascending: true })
         .limit(300),
-      supabase.from("categories").select("id,name").order("name", { ascending: true })
+      supabase.from("categories").select("id,name").order("name", { ascending: true }),
+      supabase
+        .from("reservations")
+        .select("id,book_id,status")
+        .eq("user_id", session?.user.id ?? "")
+        .in("status", ["pending", "ready_for_pickup"])
     ]);
 
     if (booksResult.error) {
@@ -280,8 +299,20 @@ export default function CategoryPage() {
       return;
     }
 
+    if (reservationsResult.error) {
+      setNotice(reservationsResult.error.message);
+      if (source === "manual") {
+        setIsFetching(false);
+      } else {
+        setIsLiveSyncing(false);
+      }
+      return;
+    }
+
     setBooks(((booksResult.data ?? []) as RawBookRecord[]).map(normalizeBook));
     setCategories((categoriesResult.data ?? []) as CategoryRow[]);
+    const activeReservations = (reservationsResult.data ?? []) as ActiveReservation[];
+    setReservedBookIds(new Set(activeReservations.map((reservation) => reservation.book_id)));
     setNotice("");
     setLastSyncedAt(new Date().toISOString());
 
@@ -290,7 +321,7 @@ export default function CategoryPage() {
     } else {
       setIsLiveSyncing(false);
     }
-  }, []);
+  }, [session?.user.id]);
 
   useEffect(() => {
     if (!session?.user.id) return;
@@ -383,6 +414,34 @@ export default function CategoryPage() {
   const handleSignOut = async () => {
     await supabase.auth.signOut();
     navigate("/", { replace: true });
+  };
+
+  const handleReserveBook = async (bookId: string) => {
+    if (!session?.user.id) return;
+
+    setActiveReserveBookId(bookId);
+    setNotice("");
+
+    const { error } = await supabase.from("reservations").insert({
+      user_id: session.user.id,
+      book_id: bookId,
+      status: "pending"
+    });
+
+    if (error) {
+      if (error.code === "23505" || /duplicate/i.test(error.message)) {
+        setReservedBookIds((previous) => new Set([...previous, bookId]));
+        setNotice("You already have an active reservation for this book.");
+      } else {
+        setNotice(error.message);
+      }
+      setActiveReserveBookId(null);
+      return;
+    }
+
+    setReservedBookIds((previous) => new Set([...previous, bookId]));
+    setNotice("");
+    setActiveReserveBookId(null);
   };
 
   const userEmail = session?.user.email ?? "student@vsu.edu.ph";
@@ -506,7 +565,14 @@ export default function CategoryPage() {
               const availabilityState = getAvailabilityState(book);
               const availabilityClass = getAvailabilityClass(availabilityState);
               return (
-                <article key={book.id} className="discover-result-card">
+                <article
+                  key={book.id}
+                  className="discover-result-card book-card-link"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => navigate(`/books/${book.id}`)}
+                  onKeyDown={(event) => onCardKeyDown(event, () => navigate(`/books/${book.id}`))}
+                >
                   <div
                     className={`discover-result-cover ${getToneClass(book.id)} ${book.coverImageUrl ? "has-image" : ""}`.trim()}
                     style={
@@ -544,14 +610,32 @@ export default function CategoryPage() {
                     </p>
 
                     <div className="discover-result-actions">
-                      <button
-                        type="button"
-                        className="btn btn-primary btn-small"
-                        onClick={() => navigate("/reservations")}
-                        disabled={!canReserveFromCategory(availabilityState)}
-                      >
-                        {!canReserveFromCategory(availabilityState) ? "Unavailable right now" : "Reserve from reservations"}
-                      </button>
+                      {(() => {
+                        const isReserved = reservedBookIds.has(book.id);
+                        const canReserve = canReserveFromCategory(availabilityState);
+                        const isSaving = activeReserveBookId === book.id;
+
+                        return (
+                          <button
+                            type="button"
+                            className="btn btn-primary btn-small"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void handleReserveBook(book.id);
+                            }}
+                            onKeyDown={(event) => event.stopPropagation()}
+                            disabled={!canReserve || isReserved || isSaving}
+                          >
+                            {!canReserve
+                              ? "Unavailable right now"
+                              : isReserved
+                              ? "Reserved"
+                              : isSaving
+                              ? "Saving..."
+                              : "Reserve"}
+                          </button>
+                        );
+                      })()}
                     </div>
                   </div>
                 </article>

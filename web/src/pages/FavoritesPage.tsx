@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { KeyboardEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { Session } from "@supabase/supabase-js";
 import { useNavigate } from "react-router-dom";
 import { hasSupabaseEnv, supabase } from "../lib/supabase";
@@ -87,6 +87,13 @@ function getBookMonogram(title: string): string {
 function getToneClass(seed: string): string {
   const hash = Array.from(seed).reduce((acc, char) => acc + char.charCodeAt(0), 0);
   return `tone-${(hash % 5) + 1}`;
+}
+
+function onCardKeyDown(event: KeyboardEvent<HTMLElement>, onActivate: () => void) {
+  if (event.key === "Enter" || event.key === " ") {
+    event.preventDefault();
+    onActivate();
+  }
 }
 
 function normalizeBookmarkRows(rows: BookmarkRow[]): FavoriteBook[] {
@@ -415,7 +422,14 @@ export default function FavoritesPage() {
             {favorites.map((entry) => {
               const authors = normalizeAuthors(entry.book.book_authors);
               return (
-                <article key={entry.book.id} className="discover-result-card">
+                <article
+                  key={entry.book.id}
+                  className="discover-result-card book-card-link"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => navigate(`/books/${entry.book.id}`)}
+                  onKeyDown={(event) => onCardKeyDown(event, () => navigate(`/books/${entry.book.id}`))}
+                >
                   <div
                     className={`discover-result-cover ${getToneClass(entry.book.id)} ${entry.book.cover_image_url ? "has-image" : ""}`.trim()}
                     style={
@@ -456,9 +470,11 @@ export default function FavoritesPage() {
                       <button
                         type="button"
                         className="btn btn-soft btn-small"
-                        onClick={() => {
+                        onClick={(event) => {
+                          event.stopPropagation();
                           void handleRemoveFavorite(entry.book.id);
                         }}
+                        onKeyDown={(event) => event.stopPropagation()}
                         disabled={activeAction === `remove-${entry.book.id}`}
                       >
                         {activeAction === `remove-${entry.book.id}` ? "Removing..." : "Remove"}
@@ -466,7 +482,11 @@ export default function FavoritesPage() {
                       <button
                         type="button"
                         className="btn btn-primary btn-small"
-                        onClick={() => navigate("/reservations")}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          navigate("/reservations");
+                        }}
+                        onKeyDown={(event) => event.stopPropagation()}
                         disabled={entry.book.available_copies <= 0}
                       >
                         {entry.book.available_copies <= 0 ? "Unavailable" : "Reserve"}
@@ -501,7 +521,14 @@ export default function FavoritesPage() {
         ) : (
           <div className="discover-recommend-grid">
             {catalogSuggestions.map((book) => (
-              <article key={book.id} className="discover-recommend-card">
+              <article
+                key={book.id}
+                className="discover-recommend-card book-card-link"
+                role="button"
+                tabIndex={0}
+                onClick={() => navigate(`/books/${book.id}`)}
+                onKeyDown={(event) => onCardKeyDown(event, () => navigate(`/books/${book.id}`))}
+              >
                 <div
                   className={`discover-book-cover ${getToneClass(book.id)} ${book.cover_image_url ? "has-image" : ""}`.trim()}
                   style={
@@ -521,9 +548,11 @@ export default function FavoritesPage() {
                   <button
                     type="button"
                     className="btn btn-soft btn-small"
-                    onClick={() => {
+                    onClick={(event) => {
+                      event.stopPropagation();
                       void handleAddFavorite(book.id);
                     }}
+                    onKeyDown={(event) => event.stopPropagation()}
                     disabled={activeAction === `add-${book.id}`}
                   >
                     {activeAction === `add-${book.id}` ? "Saving..." : "Add"}
