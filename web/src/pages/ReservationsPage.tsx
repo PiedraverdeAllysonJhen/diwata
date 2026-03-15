@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { KeyboardEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { Session } from "@supabase/supabase-js";
 import { useNavigate } from "react-router-dom";
 import { hasSupabaseEnv, supabase } from "../lib/supabase";
@@ -11,23 +11,6 @@ import {
   formatPublicationLabel,
   normalizeAuthors
 } from "../lib/bookMetadata";
-
-type BookRecord = {
-  id: string;
-  isbn: string | null;
-  title: string;
-  subtitle: string | null;
-  description: string | null;
-  publisher: string | null;
-  language: string | null;
-  publication_year: number | null;
-  publication_date: string | null;
-  cover_image_url: string | null;
-  tags: string[] | null;
-  available_copies: number;
-  total_copies: number;
-  book_authors: RawAuthorRelation[] | null;
-};
 
 type ReservationBook = {
   id: string;
@@ -45,7 +28,7 @@ type ReservationBook = {
   book_authors: RawAuthorRelation[] | null;
 };
 
-type ReservationStatus = "pending" | "ready_for_pickup";
+type ReservationStatus = "pending" | "ready_for_pickup" | "fulfilled";
 
 type ReservationRecord = {
   id: string;
@@ -63,7 +46,8 @@ type Notice = {
 
 type LoadSource = "manual" | "live";
 
-const activeReservationStatuses: ReservationStatus[] = ["pending", "ready_for_pickup"];
+const visibleReservationStatuses: ReservationStatus[] = ["pending", "ready_for_pickup", "fulfilled"];
+const cancellableReservationStatuses: ReservationStatus[] = ["pending", "ready_for_pickup"];
 
 function formatDate(dateValue: string | null) {
   if (!dateValue) return "No date";
@@ -119,6 +103,21 @@ function getToneClass(seed: string): string {
   return `tone-${(hash % 5) + 1}`;
 }
 
+function mapReservationWriteError(message: string): string {
+  if (message.includes("notification_delivery_status") || message.includes("notification_dispatch_queue")) {
+    return "Reservation save failed due to a legacy notifier DB trigger. Run the latest migration SQL for this branch, then try again.";
+  }
+
+  return message;
+}
+
+function onCardKeyDown(event: KeyboardEvent<HTMLElement>, onActivate: () => void) {
+  if (event.key === "Enter" || event.key === " ") {
+    event.preventDefault();
+    onActivate();
+  }
+}
+
 export default function ReservationsPage() {
   const navigate = useNavigate();
   const [session, setSession] = useState<Session | null>(null);
@@ -127,7 +126,6 @@ export default function ReservationsPage() {
   const [isLiveSyncing, setIsLiveSyncing] = useState(false);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [activeAction, setActiveAction] = useState<string | null>(null);
-  const [books, setBooks] = useState<BookRecord[]>([]);
   const [reservations, setReservations] = useState<ReservationRecord[]>([]);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
@@ -184,33 +182,14 @@ export default function ReservationsPage() {
         setIsLiveSyncing(true);
       }
 
-      const [booksResult, reservationsResult] = await Promise.all([
-        supabase
-          .from("books")
-          .select(
-            "id,isbn,title,subtitle,description,publisher,language,publication_year,publication_date,cover_image_url,tags,available_copies,total_copies,book_authors(author_id,authors(id,name))"
-          )
-          .gt("available_copies", 0)
-          .order("title", { ascending: true })
-          .limit(120),
-        supabase
-          .from("reservations")
-          .select(
-            "id,book_id,status,requested_at,expires_at,books(id,isbn,title,subtitle,publisher,language,publication_year,publication_date,cover_image_url,tags,available_copies,total_copies,book_authors(author_id,authors(id,name)))"
-          )
-          .eq("user_id", session.user.id)
-          .in("status", activeReservationStatuses)
-          .order("requested_at", { ascending: false })
-      ]);
-
-      if (booksResult.error) {
-        setNotice({
-          type: "error",
-          text: booksResult.error.message
-        });
-      } else {
-        setBooks((booksResult.data ?? []) as BookRecord[]);
-      }
+      const reservationsResult = await supabase
+        .from("reservations")
+        .select(
+          "id,book_id,status,requested_at,expires_at,books(id,isbn,title,subtitle,publisher,language,publication_year,publication_date,cover_image_url,tags,available_copies,total_copies,book_authors(author_id,authors(id,name)))"
+        )
+        .eq("user_id", session.user.id)
+        .in("status", visibleReservationStatuses)
+        .order("requested_at", { ascending: false });
 
       if (reservationsResult.error) {
         setNotice({
@@ -221,7 +200,7 @@ export default function ReservationsPage() {
         setReservations((reservationsResult.data ?? []) as ReservationRecord[]);
       }
 
-      if (!booksResult.error && !reservationsResult.error) {
+      if (!reservationsResult.error) {
         setNotice(null);
       }
 
@@ -281,66 +260,38 @@ export default function ReservationsPage() {
     };
   }, [session?.user.id, loadReservationData]);
 
-  const reservedBookIds = useMemo(() => {
-    return new Set(reservations.map((reservation) => reservation.book_id));
-  }, [reservations]);
-
-  const filteredBooks = useMemo(() => {
+  const filteredReservations = useMemo(() => {
     const keyword = searchQuery.trim().toLowerCase();
-    if (!keyword) return books;
+    if (!keyword) return reservations;
 
-    return books.filter((book) => {
+    return reservations.filter((reservation) => {
+      const book = normalizeReservationBook(reservation.books);
       const values = [
-        book.title,
-        book.subtitle ?? "",
-        book.language ?? "",
-        book.publication_year ? String(book.publication_year) : "",
-        book.publication_date ?? "",
-        book.isbn ?? "",
-        book.publisher ?? "",
-        (book.tags ?? []).join(" "),
-        normalizeAuthors(book.book_authors).join(" ")
+        book?.title ?? "",
+        book?.subtitle ?? "",
+        book?.language ?? "",
+        book?.publication_year ? String(book.publication_year) : "",
+        book?.publication_date ?? "",
+        book?.isbn ?? "",
+        book?.publisher ?? "",
+        (book?.tags ?? []).join(" "),
+        normalizeAuthors(book?.book_authors ?? null).join(" "),
+        reservation.status,
+        reservation.id
       ];
 
       return values.some((value) => value.toLowerCase().includes(keyword));
     });
-  }, [books, searchQuery]);
+  }, [reservations, searchQuery]);
 
-  const handleReserveBook = async (bookId: string) => {
-    if (!session?.user.id) return;
+  const reservationMetrics = useMemo(() => {
+    const activeReserved = reservations.filter((item) =>
+      item.status === "pending" || item.status === "ready_for_pickup"
+    ).length;
+    const borrowed = reservations.filter((item) => item.status === "fulfilled").length;
 
-    setActiveAction(`reserve-${bookId}`);
-    setNotice(null);
-
-    const { error } = await supabase.from("reservations").insert({
-      user_id: session.user.id,
-      book_id: bookId,
-      status: "pending"
-    });
-
-    if (error) {
-      if (error.code === "23505" || /duplicate/i.test(error.message)) {
-        setNotice({
-          type: "error",
-          text: "You already have an active reservation for this book."
-        });
-      } else {
-        setNotice({
-          type: "error",
-          text: error.message
-        });
-      }
-      setActiveAction(null);
-      return;
-    }
-
-    setNotice({
-      type: "success",
-      text: "Reservation created successfully."
-    });
-    await loadReservationData("live");
-    setActiveAction(null);
-  };
+    return { activeReserved, borrowed };
+  }, [reservations]);
 
   const handleCancelReservation = async (reservationId: string) => {
     if (!session?.user.id) return;
@@ -356,12 +307,12 @@ export default function ReservationsPage() {
       })
       .eq("id", reservationId)
       .eq("user_id", session.user.id)
-      .in("status", activeReservationStatuses);
+      .in("status", cancellableReservationStatuses);
 
     if (error) {
       setNotice({
         type: "error",
-        text: error.message
+        text: mapReservationWriteError(error.message)
       });
       setActiveAction(null);
       return;
@@ -413,7 +364,7 @@ export default function ReservationsPage() {
       activeRoute="reservations"
       activeMenuKey="reservation"
       title="Reservation Workspace"
-      description="Reserve available books and manage your active reservation queue in one place."
+      description="Track reserved and borrowed books, manage queue status, and open full transaction details."
       userEmail={userEmail}
       notifier={{
         notifications: notifier.notifications,
@@ -425,8 +376,8 @@ export default function ReservationsPage() {
         onMarkAllRead: notifier.markAllAsRead
       }}
       sidebarStats={[
-        { label: "Books Available", value: String(books.length) },
-        { label: "Active Queue", value: String(reservations.length) }
+        { label: "Reserved", value: String(reservationMetrics.activeReserved) },
+        { label: "Borrowed", value: String(reservationMetrics.borrowed) }
       ]}
       sidebarAction={{
         label: isFetching ? "Refreshing..." : "Refresh List",
@@ -457,22 +408,22 @@ export default function ReservationsPage() {
     >
       <section className="discover-stat-strip" aria-label="Reservation summary">
         <article className="discover-stat-card">
-          <span>Books Available</span>
-          <strong>{books.length}</strong>
+          <span>Reserved</span>
+          <strong>{reservationMetrics.activeReserved}</strong>
         </article>
         <article className="discover-stat-card">
-          <span>Active Reservations</span>
-          <strong>{reservations.length}</strong>
+          <span>Borrowed</span>
+          <strong>{reservationMetrics.borrowed}</strong>
         </article>
         <article className="discover-stat-card">
           <span>Search Results</span>
-          <strong>{filteredBooks.length}</strong>
+          <strong>{filteredReservations.length}</strong>
         </article>
       </section>
 
       <section className="reservation-toolbar">
         <label htmlFor="book-search" className="search-field">
-          <span>Search available books</span>
+          <span>Search reserved or borrowed books</span>
           <input
             id="book-search"
             type="search"
@@ -481,137 +432,98 @@ export default function ReservationsPage() {
             placeholder="Type title, author, ISBN, language, or year"
           />
         </label>
-        <p className="toolbar-hint">Showing {filteredBooks.length} matching books.</p>
+        <p className="toolbar-hint">Showing {filteredReservations.length} matching records.</p>
       </section>
 
-      <section className="discover-grid-two reservation-workspace-grid">
-        <article className="discover-section">
-          <header className="discover-section-head">
-            <h2>Available Books</h2>
-          </header>
+      <section className="discover-section">
+        <header className="discover-section-head">
+          <h2>Reserved & Borrowed Books</h2>
+        </header>
 
-          {filteredBooks.length === 0 ? (
-            <p className="empty-state">No books match your search right now.</p>
-          ) : (
-            <ul className="reservation-list reservation-list-available">
-              {filteredBooks.map((book) => {
-                const isReserved = reservedBookIds.has(book.id);
-                const isActionLoading = activeAction === `reserve-${book.id}`;
-                const authors = normalizeAuthors(book.book_authors);
+        {filteredReservations.length === 0 ? (
+          <p className="empty-state">No reserved or borrowed books match your search.</p>
+        ) : (
+          <ul className="reservation-list reservation-list-active">
+            {filteredReservations.map((reservation) => {
+              const isActionLoading = activeAction === `cancel-${reservation.id}`;
+              const reservationBook = normalizeReservationBook(reservation.books);
+              const authors = normalizeAuthors(reservationBook?.book_authors ?? null);
+              const canCancel = reservation.status === "pending" || reservation.status === "ready_for_pickup";
 
-                return (
-                  <li key={book.id} className="reservation-item">
-                    <div
-                      className={`discover-result-cover ${getToneClass(book.id)} ${book.cover_image_url ? "has-image" : ""}`.trim()}
-                      style={
-                        book.cover_image_url
-                          ? {
-                              backgroundImage: `linear-gradient(165deg, rgba(7, 66, 52, 0.42), rgba(7, 66, 52, 0.08)), url(${book.cover_image_url})`
-                            }
-                          : undefined
-                      }
-                    >
-                      {!book.cover_image_url ? <span>{getBookMonogram(book.title)}</span> : null}
+              return (
+                <li
+                  key={reservation.id}
+                  className="reservation-item book-card-link"
+                  role={reservationBook?.id ? "button" : undefined}
+                  tabIndex={reservationBook?.id ? 0 : undefined}
+                  onClick={
+                    reservationBook?.id
+                      ? () => {
+                          navigate(`/books/${reservationBook.id}`);
+                        }
+                      : undefined
+                  }
+                  onKeyDown={
+                    reservationBook?.id
+                      ? (event) => onCardKeyDown(event, () => navigate(`/books/${reservationBook.id}`))
+                      : undefined
+                  }
+                >
+                  <div
+                    className={`discover-result-cover ${getToneClass(reservationBook?.id ?? reservation.id)} ${reservationBook?.cover_image_url ? "has-image" : ""}`.trim()}
+                    style={
+                      reservationBook?.cover_image_url
+                        ? {
+                            backgroundImage: `linear-gradient(165deg, rgba(7, 66, 52, 0.42), rgba(7, 66, 52, 0.08)), url(${reservationBook.cover_image_url})`
+                          }
+                        : undefined
+                    }
+                  >
+                    {!reservationBook?.cover_image_url ? <span>{getBookMonogram(reservationBook?.title ?? "Book")}</span> : null}
+                  </div>
+                  <div className="reservation-item-content">
+                    <div className="reservation-item-head">
+                      <p className="reservation-item-title">{reservationBook?.title ?? "Unknown book"}</p>
+                      <span className={`status-pill status-${reservation.status}`}>
+                        {formatStatus(reservation.status)}
+                      </span>
                     </div>
-                    <div className="reservation-item-content">
-                      <p className="reservation-item-title">{book.title}</p>
-                      <div className="reservation-meta-grid">
-                        <p className="reservation-item-meta"><strong>Author:</strong> {formatAuthorLine(authors)}</p>
-                        <p className="reservation-item-meta"><strong>Publish date:</strong> {formatPublicationLabel(book.publication_date, book.publication_year)}</p>
-                        <p className="reservation-item-meta"><strong>ISBN:</strong> {book.isbn ?? "N/A"}</p>
-                        <p className="reservation-item-meta"><strong>Subtitle:</strong> {book.subtitle ?? "N/A"}</p>
-                        <p className="reservation-item-meta"><strong>Publisher:</strong> {book.publisher ?? "N/A"}</p>
-                        <p className="reservation-item-meta"><strong>Language:</strong> {book.language ?? "N/A"}</p>
-                        <p className="reservation-item-meta"><strong>Copies:</strong> {book.available_copies} available / {book.total_copies} total</p>
-                        <p className="reservation-item-meta"><strong>Tags:</strong> {(book.tags ?? []).length > 0 ? (book.tags ?? []).join(", ") : "None"}</p>
-                      </div>
-                      <p className="reservation-item-meta reservation-description"><strong>Description:</strong> {book.description ?? "No description provided."}</p>
+                    <div className="reservation-meta-grid">
+                      <p className="reservation-item-meta"><strong>Author:</strong> {formatAuthorLine(authors)}</p>
+                      <p className="reservation-item-meta"><strong>Publish date:</strong> {formatPublicationLabel(reservationBook?.publication_date, reservationBook?.publication_year)}</p>
+                      <p className="reservation-item-meta"><strong>ISBN:</strong> {reservationBook?.isbn ?? "N/A"}</p>
+                      <p className="reservation-item-meta"><strong>Subtitle:</strong> {reservationBook?.subtitle ?? "N/A"}</p>
+                      <p className="reservation-item-meta"><strong>Publisher:</strong> {reservationBook?.publisher ?? "N/A"}</p>
+                      <p className="reservation-item-meta"><strong>Language:</strong> {reservationBook?.language ?? "N/A"}</p>
+                      <p className="reservation-item-meta"><strong>Copies:</strong> {reservationBook?.available_copies ?? 0} available / {reservationBook?.total_copies ?? 0} total</p>
+                      <p className="reservation-item-meta"><strong>Tags:</strong> {(reservationBook?.tags ?? []).length > 0 ? (reservationBook?.tags ?? []).join(", ") : "None"}</p>
+                      <p className="reservation-item-meta"><strong>Requested:</strong> {formatDate(reservation.requested_at)}</p>
+                      <p className="reservation-item-meta"><strong>Expires:</strong> {reservation.expires_at ? formatDate(reservation.expires_at) : "No expiry"}</p>
                     </div>
-                    <div className="reservation-item-actions">
-                      <button
-                        type="button"
-                        className="btn btn-primary btn-small"
-                        disabled={isReserved || isActionLoading}
-                        onClick={() => {
-                          void handleReserveBook(book.id);
-                        }}
-                      >
-                        {isReserved ? "Already reserved" : isActionLoading ? "Saving..." : "Reserve"}
-                      </button>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </article>
-
-        <article className="discover-section">
-          <header className="discover-section-head">
-            <h2>Your Active Reservations</h2>
-          </header>
-
-          {reservations.length === 0 ? (
-            <p className="empty-state">You have no active reservations yet.</p>
-          ) : (
-            <ul className="reservation-list reservation-list-active">
-              {reservations.map((reservation) => {
-                const isActionLoading = activeAction === `cancel-${reservation.id}`;
-                const reservationBook = normalizeReservationBook(reservation.books);
-                const authors = normalizeAuthors(reservationBook?.book_authors ?? null);
-
-                return (
-                  <li key={reservation.id} className="reservation-item">
-                    <div
-                      className={`discover-result-cover ${getToneClass(reservationBook?.id ?? reservation.id)} ${reservationBook?.cover_image_url ? "has-image" : ""}`.trim()}
-                      style={
-                        reservationBook?.cover_image_url
-                          ? {
-                              backgroundImage: `linear-gradient(165deg, rgba(7, 66, 52, 0.42), rgba(7, 66, 52, 0.08)), url(${reservationBook.cover_image_url})`
-                            }
-                          : undefined
-                      }
-                    >
-                      {!reservationBook?.cover_image_url ? <span>{getBookMonogram(reservationBook?.title ?? "Book")}</span> : null}
-                    </div>
-                    <div className="reservation-item-content">
-                      <div className="reservation-item-head">
-                        <p className="reservation-item-title">{reservationBook?.title ?? "Unknown book"}</p>
-                        <span className={`status-pill status-${reservation.status}`}>
-                          {formatStatus(reservation.status)}
-                        </span>
-                      </div>
-                      <div className="reservation-meta-grid">
-                        <p className="reservation-item-meta"><strong>Author:</strong> {formatAuthorLine(authors)}</p>
-                        <p className="reservation-item-meta"><strong>Publish date:</strong> {formatPublicationLabel(reservationBook?.publication_date, reservationBook?.publication_year)}</p>
-                        <p className="reservation-item-meta"><strong>ISBN:</strong> {reservationBook?.isbn ?? "N/A"}</p>
-                        <p className="reservation-item-meta"><strong>Subtitle:</strong> {reservationBook?.subtitle ?? "N/A"}</p>
-                        <p className="reservation-item-meta"><strong>Publisher:</strong> {reservationBook?.publisher ?? "N/A"}</p>
-                        <p className="reservation-item-meta"><strong>Language:</strong> {reservationBook?.language ?? "N/A"}</p>
-                        <p className="reservation-item-meta"><strong>Copies:</strong> {reservationBook?.available_copies ?? 0} available / {reservationBook?.total_copies ?? 0} total</p>
-                        <p className="reservation-item-meta"><strong>Tags:</strong> {(reservationBook?.tags ?? []).length > 0 ? (reservationBook?.tags ?? []).join(", ") : "None"}</p>
-                        <p className="reservation-item-meta"><strong>Requested:</strong> {formatDate(reservation.requested_at)}</p>
-                        <p className="reservation-item-meta"><strong>Expires:</strong> {reservation.expires_at ? formatDate(reservation.expires_at) : "No expiry"}</p>
-                      </div>
-                    </div>
-                    <div className="reservation-item-actions">
+                  </div>
+                  <div className="reservation-item-actions">
+                    {canCancel ? (
                       <button
                         type="button"
                         className="btn btn-soft btn-small"
                         disabled={isActionLoading}
-                        onClick={() => {
+                        onClick={(event) => {
+                          event.stopPropagation();
                           void handleCancelReservation(reservation.id);
                         }}
+                        onKeyDown={(event) => event.stopPropagation()}
                       >
                         {isActionLoading ? "Cancelling..." : "Cancel reservation"}
                       </button>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </article>
+                    ) : (
+                      <span className="status-pill status-fulfilled">Borrowed</span>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
       </section>
     </LibraryWorkspaceLayout>
   );

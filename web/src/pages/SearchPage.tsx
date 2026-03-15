@@ -1,4 +1,4 @@
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { Session } from "@supabase/supabase-js";
 import { useNavigate } from "react-router-dom";
 import { hasSupabaseEnv, supabase } from "../lib/supabase";
@@ -197,6 +197,13 @@ function getBookMonogram(title: string): string {
 function getToneClass(seed: string): string {
   const hash = Array.from(seed).reduce((acc, char) => acc + char.charCodeAt(0), 0);
   return `tone-${(hash % 5) + 1}`;
+}
+
+function onCardKeyDown(event: KeyboardEvent<HTMLElement>, onActivate: () => void) {
+  if (event.key === "Enter" || event.key === " ") {
+    event.preventDefault();
+    onActivate();
+  }
 }
 
 export default function SearchPage() {
@@ -633,7 +640,14 @@ export default function SearchPage() {
             {featuredBooks.map((book) => {
               const availability = getAvailabilityState(book);
               return (
-                <article key={`featured-${book.id}`} className="discover-recommend-card">
+                <article
+                  key={`featured-${book.id}`}
+                  className="discover-recommend-card book-card-link"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => navigate(`/books/${book.id}`)}
+                  onKeyDown={(event) => onCardKeyDown(event, () => navigate(`/books/${book.id}`))}
+                >
                   <div
                     className={`discover-book-cover ${getToneClass(book.id)} ${book.coverImageUrl ? "has-image" : ""}`.trim()}
                     style={
@@ -656,7 +670,11 @@ export default function SearchPage() {
                     <button
                       type="button"
                       className="btn btn-soft btn-small"
-                      onClick={() => navigate("/reservations")}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        navigate("/reservations");
+                      }}
+                      onKeyDown={(event) => event.stopPropagation()}
                       disabled={!canReserveFromSearch(availability)}
                     >
                       {!canReserveFromSearch(availability) ? "Unavailable" : "Reserve"}
@@ -711,7 +729,14 @@ export default function SearchPage() {
                 const availabilityState = getAvailabilityState(book);
 
                 return (
-                  <article key={book.id} className="discover-result-card">
+                  <article
+                    key={book.id}
+                    className="discover-result-card book-card-link"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => navigate(`/books/${book.id}`)}
+                    onKeyDown={(event) => onCardKeyDown(event, () => navigate(`/books/${book.id}`))}
+                  >
                     <div
                       className={`discover-result-cover ${getToneClass(book.id)} ${book.coverImageUrl ? "has-image" : ""}`.trim()}
                       style={
@@ -762,7 +787,11 @@ export default function SearchPage() {
                         <button
                           type="button"
                           className="btn btn-primary btn-small"
-                          onClick={() => navigate("/reservations")}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            navigate("/reservations");
+                          }}
+                          onKeyDown={(event) => event.stopPropagation()}
                           disabled={!canReserveFromSearch(availabilityState)}
                         >
                           {!canReserveFromSearch(availabilityState) ? "Unavailable right now" : "Reserve from reservations"}

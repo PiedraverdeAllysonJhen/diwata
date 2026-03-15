@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import AuthPage from "./pages/AuthPage";
+import BookDetailsPage from "./pages/BookDetailsPage";
 import CategoryPage from "./pages/CategoryPage";
 import DashboardPage from "./pages/DashboardPage";
 import FavoritesPage from "./pages/FavoritesPage";
@@ -15,6 +16,7 @@ export default function App() {
       <Route path="/" element={<AuthPage />} />
       <Route path="/dashboard" element={<DashboardPage />} />
       <Route path="/search" element={<SearchPage />} />
+      <Route path="/books/:bookId" element={<BookDetailsPage />} />
       <Route path="/category" element={<CategoryPage />} />
       <Route path="/reservations" element={<ReservationsPage />} />
       <Route path="/favorites" element={<FavoritesPage />} />
