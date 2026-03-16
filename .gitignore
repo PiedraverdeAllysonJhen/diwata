@@ -6,10 +6,12 @@ web/node_modules/
 web/dist/
 
 # Env files
+.env
 .env.local
 .env.development.local
 .env.test.local
 .env.production.local
+web/.env
 web/.env.local
 web/.env.development.local
 web/.env.test.local
