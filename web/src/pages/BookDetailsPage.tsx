@@ -79,6 +79,7 @@ type Notice = {
 };
 
 type LoadSource = "manual" | "live";
+type FeedbackMode = "review" | "comment";
 type ActiveReservationStatus = "pending" | "ready_for_pickup" | null;
 
 function normalizeCategories(relations: RawCategoryRelation[] | null): string[] {
@@ -202,6 +203,7 @@ export default function BookDetailsPage() {
   const [favoriteCount, setFavoriteCount] = useState(0);
   const [borrowCount, setBorrowCount] = useState(0);
   const [isFavorited, setIsFavorited] = useState(false);
+  const [feedbackMode, setFeedbackMode] = useState<FeedbackMode>("review");
   const [reviewRating, setReviewRating] = useState(5);
   const [reviewText, setReviewText] = useState("");
   const [commentText, setCommentText] = useState("");
@@ -444,16 +446,13 @@ export default function BookDetailsPage() {
     return total / reviews.length;
   }, [reviews]);
 
-  useEffect(() => {
-    if (!myReview) {
-      setReviewRating(5);
-      setReviewText("");
-      return;
-    }
+  const handleLoadMyReview = () => {
+    if (!myReview) return;
 
+    setFeedbackMode("review");
     setReviewRating(myReview.rating);
     setReviewText(myReview.review_text ?? "");
-  }, [myReview?.id, myReview?.rating, myReview?.review_text]);
+  };
 
   const handleReserve = async () => {
     if (!session?.user.id || !book) return;
@@ -554,6 +553,8 @@ export default function BookDetailsPage() {
       type: "success",
       text: myReview ? "Your review has been updated." : "Your review has been submitted."
     });
+    setReviewRating(5);
+    setReviewText("");
     await loadDetails("live");
     setActiveAction(null);
   };
@@ -573,6 +574,8 @@ export default function BookDetailsPage() {
     }
 
     setNotice({ type: "success", text: "Your review has been removed." });
+    setReviewRating(5);
+    setReviewText("");
     await loadDetails("live");
     setActiveAction(null);
   };
@@ -815,6 +818,151 @@ export default function BookDetailsPage() {
             </div>
           </section>
 
+          <section className="discover-section book-feedback-composer">
+            <header className="discover-section-head">
+              <h2>Share Feedback</h2>
+              <p className="discover-inline-meta">
+                Switch between a review and a comment without stacking two textboxes on the page.
+              </p>
+            </header>
+
+            <div className="book-feedback-toggle" role="tablist" aria-label="Feedback type">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={feedbackMode === "review"}
+                className={`book-feedback-toggle-btn ${feedbackMode === "review" ? "active" : ""}`.trim()}
+                onClick={() => setFeedbackMode("review")}
+              >
+                Write a review
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={feedbackMode === "comment"}
+                className={`book-feedback-toggle-btn ${feedbackMode === "comment" ? "active" : ""}`.trim()}
+                onClick={() => setFeedbackMode("comment")}
+              >
+                Add a comment
+              </button>
+            </div>
+
+            {feedbackMode === "review" ? (
+              <>
+                <p className="book-feedback-note">
+                  {myReview
+                    ? "You already posted a review. Submit again to replace it, or reload your saved text into the form."
+                    : "Choose a rating and add optional written feedback for other readers."}
+                </p>
+
+                <form className="book-feedback-form" onSubmit={handleReviewSubmit}>
+                  <label className="settings-field">
+                    <span>Rating</span>
+                    <select
+                      value={String(reviewRating)}
+                      onChange={(event) => setReviewRating(Number(event.target.value))}
+                    >
+                      <option value="5">5 - Excellent</option>
+                      <option value="4">4 - Very good</option>
+                      <option value="3">3 - Good</option>
+                      <option value="2">2 - Fair</option>
+                      <option value="1">1 - Poor</option>
+                    </select>
+                  </label>
+
+                  <label className="settings-field">
+                    <span>Review</span>
+                    <textarea
+                      value={reviewText}
+                      onChange={(event) => setReviewText(event.target.value)}
+                      rows={4}
+                      maxLength={2000}
+                      placeholder="Write your review (optional if rating only)."
+                    />
+                  </label>
+
+                  <div className="book-feedback-actions">
+                    <button type="submit" className="btn btn-primary btn-small" disabled={activeAction === "review"}>
+                      {activeAction === "review" ? "Saving..." : myReview ? "Replace review" : "Submit review"}
+                    </button>
+                    {myReview ? (
+                      <button
+                        type="button"
+                        className="btn btn-soft btn-small"
+                        onClick={handleLoadMyReview}
+                        disabled={activeAction === "review" || activeAction === "delete-review"}
+                      >
+                        Use saved review
+                      </button>
+                    ) : null}
+                    {myReview ? (
+                      <button
+                        type="button"
+                        className="btn btn-soft btn-small"
+                        disabled={activeAction === "delete-review"}
+                        onClick={() => {
+                          void handleReviewDelete();
+                        }}
+                      >
+                        {activeAction === "delete-review" ? "Removing..." : "Delete my review"}
+                      </button>
+                    ) : null}
+                  </div>
+                </form>
+              </>
+            ) : (
+              <>
+                <p className="book-feedback-note">
+                  Post a quick comment to join the discussion while keeping the feedback area focused.
+                </p>
+
+                <form className="book-feedback-form" onSubmit={handleCommentSubmit}>
+                  <label className="settings-field">
+                    <span>Add comment</span>
+                    <textarea
+                      value={commentText}
+                      onChange={(event) => setCommentText(event.target.value)}
+                      rows={4}
+                      maxLength={2000}
+                      placeholder="Write your comment."
+                    />
+                  </label>
+
+                  <div className="book-feedback-actions">
+                    <button type="submit" className="btn btn-primary btn-small" disabled={activeAction === "comment"}>
+                      {activeAction === "comment" ? "Posting..." : "Post comment"}
+                    </button>
+                  </div>
+                </form>
+              </>
+            )}
+          </section>
+
+          <section className="workspace-summary-strip book-feedback-summary" aria-label="Feedback overview">
+            <article className="discover-stat-card">
+              <span>Average Rating</span>
+              <strong>{averageRating.toFixed(1)}</strong>
+            </article>
+            <article className="discover-stat-card">
+              <span>Reviews</span>
+              <strong>{reviews.length}</strong>
+            </article>
+            <article className="discover-stat-card">
+              <span>Comments</span>
+              <strong>{comments.length}</strong>
+            </article>
+            <article className="discover-stat-card">
+              <span>Your Status</span>
+              <strong>
+                {activeReservationStatus
+                  ? "Reserved"
+                  : book.availableCopies > 0
+                  ? "Can Reserve"
+                  : "Unavailable"}
+              </strong>
+            </article>
+          </section>
+
           <section className="discover-grid-two book-details-secondary">
             <article className="discover-section">
               <header className="discover-section-head">
@@ -824,57 +972,15 @@ export default function BookDetailsPage() {
                 </p>
               </header>
 
-              <form className="book-feedback-form" onSubmit={handleReviewSubmit}>
-                <label className="settings-field">
-                  <span>Rating</span>
-                  <select
-                    value={String(reviewRating)}
-                    onChange={(event) => setReviewRating(Number(event.target.value))}
-                  >
-                    <option value="5">5 - Excellent</option>
-                    <option value="4">4 - Very good</option>
-                    <option value="3">3 - Good</option>
-                    <option value="2">2 - Fair</option>
-                    <option value="1">1 - Poor</option>
-                  </select>
-                </label>
-
-                <label className="settings-field">
-                  <span>Review</span>
-                  <textarea
-                    value={reviewText}
-                    onChange={(event) => setReviewText(event.target.value)}
-                    rows={4}
-                    maxLength={2000}
-                    placeholder="Write your review (optional if rating only)."
-                  />
-                </label>
-
-                <div className="book-feedback-actions">
-                  <button type="submit" className="btn btn-primary btn-small" disabled={activeAction === "review"}>
-                    {activeAction === "review" ? "Saving..." : myReview ? "Update review" : "Submit review"}
-                  </button>
-                  {myReview ? (
-                    <button
-                      type="button"
-                      className="btn btn-soft btn-small"
-                      disabled={activeAction === "delete-review"}
-                      onClick={() => {
-                        void handleReviewDelete();
-                      }}
-                    >
-                      {activeAction === "delete-review" ? "Removing..." : "Delete my review"}
-                    </button>
-                  ) : null}
-                </div>
-              </form>
-
               {reviews.length === 0 ? (
                 <p className="empty-state">No reviews yet. Be the first to rate this book.</p>
               ) : (
                 <ul className="book-feedback-list">
                   {reviews.map((entry) => (
-                    <li key={entry.id} className="book-feedback-item">
+                    <li
+                      key={entry.id}
+                      className={`book-feedback-item ${entry.user_id === session?.user.id ? "is-user" : ""}`.trim()}
+                    >
                       <div className="book-feedback-head">
                         <p>
                           <strong>{entry.user_id === session?.user.id ? "You" : "Reader"}</strong>
@@ -895,31 +1001,15 @@ export default function BookDetailsPage() {
                 <p className="discover-inline-meta">{comments.length} comment(s)</p>
               </header>
 
-              <form className="book-feedback-form" onSubmit={handleCommentSubmit}>
-                <label className="settings-field">
-                  <span>Add comment</span>
-                  <textarea
-                    value={commentText}
-                    onChange={(event) => setCommentText(event.target.value)}
-                    rows={4}
-                    maxLength={2000}
-                    placeholder="Write your comment."
-                  />
-                </label>
-
-                <div className="book-feedback-actions">
-                  <button type="submit" className="btn btn-primary btn-small" disabled={activeAction === "comment"}>
-                    {activeAction === "comment" ? "Posting..." : "Post comment"}
-                  </button>
-                </div>
-              </form>
-
               {comments.length === 0 ? (
                 <p className="empty-state">No comments yet. Start the discussion.</p>
               ) : (
                 <ul className="book-feedback-list">
                   {comments.map((entry) => (
-                    <li key={entry.id} className="book-feedback-item">
+                    <li
+                      key={entry.id}
+                      className={`book-feedback-item ${entry.user_id === session?.user.id ? "is-user" : ""}`.trim()}
+                    >
                       <div className="book-feedback-head">
                         <p>
                           <strong>{entry.user_id === session?.user.id ? "You" : "Reader"}</strong>

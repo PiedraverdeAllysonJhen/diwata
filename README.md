@@ -11,11 +11,19 @@ accessibility, minimize waiting time, and modernize the current manual reservati
 |-----------------------|---------------|
 | DW.010.001 | 2026-02-27 |
 | DW.010.002 | 2026-03-05 |
-| DW.010.003 | YYYY-MM-DD |
+| DW.010.003 | 2026-04-04 |
 
 ---
 
 ## Release Notes
+
+## DW.010.003 Release Notes
+- Fixed reservation status mismatches so favorites now reflect active reservations and avoid duplicate reserve actions.
+- Streamlined the book details feedback flow by replacing separate stacked review/comment textboxes with a cleaner shared feedback composer.
+- Fixed settings persistence so profile updates and user preferences save reliably to Supabase.
+- Cleared review form state after successful submission, including both written text and rating reset behavior.
+- Polished the Favorites, Book Details, and Settings pages with clearer summary cards, stronger status cues, and improved visual hierarchy.
+- NOTES: No known blocking issues reported for this release.
 
 ## DW.010.002 Release Notes
 - Added project structure for frontend and backend (`web/` and `api/`).
