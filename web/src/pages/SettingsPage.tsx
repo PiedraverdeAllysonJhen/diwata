@@ -241,6 +241,8 @@ export default function SettingsPage() {
     };
 
     const profilePayload = {
+      id: session.user.id,
+      email: session.user.email ?? null,
       first_name: profileForm.first_name || null,
       last_name: profileForm.last_name || null,
       college: profileForm.college || null,
@@ -249,7 +251,7 @@ export default function SettingsPage() {
 
     const [settingsResult, profileResult] = await Promise.all([
       supabase.from("user_settings").upsert(settingsPayload, { onConflict: "user_id" }),
-      supabase.from("user_profiles").update(profilePayload).eq("id", session.user.id)
+      supabase.from("user_profiles").upsert(profilePayload, { onConflict: "id" })
     ]);
 
     if (settingsResult.error || profileResult.error) {
@@ -273,6 +275,20 @@ export default function SettingsPage() {
 
   const userEmail = session?.user.email ?? "student@vsu.edu.ph";
   const notifier = useReservationNotifier(session?.user.id);
+  const displayName =
+    [profileForm.first_name.trim(), profileForm.last_name.trim()].filter(Boolean).join(" ") ||
+    userEmail.split("@")[0];
+  const activeAlertsCount = Number(settingsForm.email_notifications_enabled) +
+    Number(settingsForm.push_notifications_enabled) +
+    Number(settingsForm.sms_notifications_enabled);
+  const completedProfileFields = [
+    profileForm.first_name,
+    profileForm.last_name,
+    profileForm.college,
+    profileForm.course
+  ].filter((value) => value.trim().length > 0).length;
+  const profileCompleteness = Math.round((completedProfileFields / 4) * 100);
+  const profileInitial = displayName.trim().charAt(0).toUpperCase() || "S";
 
   if (!hasSupabaseEnv) {
     return (
@@ -349,11 +365,44 @@ export default function SettingsPage() {
       onNavigate={(route) => navigate(`/${route}`)}
       onSignOut={handleSignOut}
     >
+      <section className="workspace-summary-strip" aria-label="Settings overview">
+        <article className="discover-stat-card">
+          <span>Profile</span>
+          <strong>{profileCompleteness}%</strong>
+        </article>
+        <article className="discover-stat-card">
+          <span>Enabled Alerts</span>
+          <strong>{activeAlertsCount}</strong>
+        </article>
+        <article className="discover-stat-card">
+          <span>Language</span>
+          <strong>{settingsForm.preferred_language.toUpperCase()}</strong>
+        </article>
+        <article className="discover-stat-card">
+          <span>Theme</span>
+          <strong>{settingsForm.theme.toUpperCase()}</strong>
+        </article>
+      </section>
+
       <form className="settings-grid" onSubmit={handleSave}>
         <section className="discover-section settings-card" aria-label="Profile information">
           <header className="discover-section-head">
             <h2>Profile</h2>
           </header>
+
+          <div className="settings-profile-preview">
+            <div className="settings-profile-avatar" aria-hidden="true">
+              {profileInitial}
+            </div>
+            <div className="settings-profile-copy">
+              <strong>{displayName}</strong>
+              <span>{userEmail}</span>
+              <p>
+                {[profileForm.college.trim(), profileForm.course.trim()].filter(Boolean).join(" • ") ||
+                  "Add your college and course to complete your profile."}
+              </p>
+            </div>
+          </div>
 
           <label htmlFor="first-name" className="settings-field">
             <span>First name</span>
@@ -409,6 +458,10 @@ export default function SettingsPage() {
             <h2>Notifications</h2>
           </header>
 
+          <p className="settings-helper-text">
+            Choose how you want reservation updates and reminders delivered.
+          </p>
+
           <button
             type="button"
             className={`settings-toggle ${settingsForm.email_notifications_enabled ? "active" : ""}`.trim()}
@@ -442,6 +495,12 @@ export default function SettingsPage() {
             <h2>Preferences</h2>
           </header>
 
+          <div className="settings-chip-row" aria-label="Preference preview">
+            <span className="settings-chip">Theme: {settingsForm.theme}</span>
+            <span className="settings-chip">Language: {settingsForm.preferred_language}</span>
+            <span className="settings-chip">Timezone: {settingsForm.timezone}</span>
+          </div>
+
           <label htmlFor="preferred-language" className="settings-field">
             <span>Preferred language</span>
             <select
@@ -454,6 +513,7 @@ export default function SettingsPage() {
               <option value="en">English</option>
               <option value="fil">Filipino</option>
             </select>
+            <small>Controls your preferred interface language for future content updates.</small>
           </label>
 
           <label htmlFor="timezone" className="settings-field">
@@ -468,6 +528,7 @@ export default function SettingsPage() {
               <option value="Asia/Manila">Asia/Manila</option>
               <option value="UTC">UTC</option>
             </select>
+            <small>Used for reservation timestamps and account activity display.</small>
           </label>
 
           <label htmlFor="theme" className="settings-field">
@@ -483,11 +544,15 @@ export default function SettingsPage() {
               <option value="light">Light</option>
               <option value="dark">Dark</option>
             </select>
+            <small>Keeps your workspace visual preference consistent across sessions.</small>
           </label>
 
-          <button type="submit" className="btn btn-primary" disabled={isSaving}>
-            {isSaving ? "Saving settings..." : "Save settings"}
-          </button>
+          <div className="settings-save-panel">
+            <p>Your profile and preferences save together to your account.</p>
+            <button type="submit" className="btn btn-primary" disabled={isSaving}>
+              {isSaving ? "Saving settings..." : "Save settings"}
+            </button>
+          </div>
         </section>
       </form>
     </LibraryWorkspaceLayout>

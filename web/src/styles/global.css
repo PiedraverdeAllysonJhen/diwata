@@ -2849,6 +2849,12 @@ input {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.workspace-summary-strip {
+  display: grid;
+  gap: 0.6rem;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 .discover-stat-card {
   border-radius: 14px;
   border: 1px solid rgba(140, 211, 159, 0.84);
@@ -3875,6 +3881,53 @@ input {
   align-content: start;
 }
 
+.settings-profile-preview {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  gap: 0.68rem;
+  padding: 0.74rem;
+  border-radius: 14px;
+  border: 1px solid rgba(145, 212, 163, 0.76);
+  background: linear-gradient(160deg, rgba(246, 253, 248, 0.96), rgba(236, 248, 240, 0.94));
+}
+
+.settings-profile-avatar {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(145deg, var(--forest-700), var(--forest-900));
+  color: #ffffff;
+  font-weight: 800;
+  font-size: 1.12rem;
+  box-shadow: 0 12px 24px rgba(9, 85, 63, 0.18);
+}
+
+.settings-profile-copy {
+  min-width: 0;
+  display: grid;
+  gap: 0.14rem;
+}
+
+.settings-profile-copy strong {
+  font-size: 0.96rem;
+  color: var(--forest-900);
+}
+
+.settings-profile-copy span {
+  color: var(--forest-700);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.settings-profile-copy p {
+  margin: 0.14rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
 .settings-field {
   display: grid;
   gap: 0.3rem;
@@ -3884,6 +3937,12 @@ input {
   font-size: 0.76rem;
   color: var(--text-muted);
   font-weight: 700;
+}
+
+.settings-field small {
+  color: var(--text-muted);
+  font-size: 0.74rem;
+  line-height: 1.4;
 }
 
 .settings-field input,
@@ -3939,6 +3998,52 @@ input {
 
 .settings-toggle.active strong {
   color: var(--forest-800);
+}
+
+.settings-helper-text {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.settings-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.38rem;
+}
+
+.settings-chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  border: 1px solid rgba(144, 207, 164, 0.78);
+  background: rgba(248, 253, 249, 0.94);
+  color: var(--forest-800);
+  padding: 0.3rem 0.58rem;
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+.settings-save-panel {
+  display: grid;
+  gap: 0.48rem;
+  margin-top: 0.18rem;
+  padding: 0.72rem;
+  border-radius: 14px;
+  border: 1px solid rgba(145, 212, 163, 0.76);
+  background: linear-gradient(160deg, rgba(246, 253, 248, 0.96), rgba(236, 248, 240, 0.94));
+}
+
+.settings-save-panel p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.settings-save-panel .btn {
+  width: fit-content;
 }
 
 .help-grid {
@@ -4022,6 +4127,10 @@ input {
   .help-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .workspace-summary-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 1100px) {
@@ -4039,6 +4148,18 @@ input {
   .settings-grid,
   .help-grid {
     grid-template-columns: 1fr;
+  }
+
+  .workspace-summary-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-profile-preview {
+    grid-template-columns: 1fr;
+  }
+
+  .favorite-pill-row {
+    justify-content: flex-start;
   }
 }
 
@@ -4392,6 +4513,42 @@ input {
   align-items: start;
 }
 
+.book-feedback-composer {
+  gap: 0.72rem;
+}
+
+.book-feedback-toggle {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.36rem;
+}
+
+.book-feedback-toggle-btn {
+  border: 1px solid rgba(138, 210, 157, 0.84);
+  border-radius: 999px;
+  background: rgba(248, 253, 249, 0.92);
+  color: var(--forest-800);
+  padding: 0.46rem 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.book-feedback-toggle-btn.active {
+  background: linear-gradient(145deg, rgba(21, 121, 93, 0.12), rgba(15, 95, 73, 0.1));
+  border-color: rgba(52, 158, 108, 0.84);
+}
+
+.book-feedback-note {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.book-feedback-summary {
+  margin-top: -0.08rem;
+}
+
 .book-feedback-form {
   display: grid;
   gap: 0.52rem;
@@ -4437,6 +4594,12 @@ input {
   gap: 0.42rem;
 }
 
+.book-feedback-item.is-user {
+  border-color: rgba(73, 171, 117, 0.84);
+  background: linear-gradient(160deg, rgba(244, 253, 247, 0.96), rgba(234, 248, 239, 0.92));
+  box-shadow: 0 10px 22px rgba(18, 112, 78, 0.08);
+}
+
 .book-feedback-item p {
   margin: 0;
   color: var(--text-muted);
@@ -4471,6 +4634,13 @@ input {
   color: var(--text-muted);
   font-size: 0.74rem;
   white-space: nowrap;
+}
+
+.favorite-pill-row {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.3rem;
 }
 
 @media (max-width: 1180px) {

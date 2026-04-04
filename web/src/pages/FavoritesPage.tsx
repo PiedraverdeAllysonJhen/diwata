@@ -40,6 +40,11 @@ type FavoriteBook = {
   book: Book;
 };
 
+type ActiveReservation = {
+  book_id: string;
+  status: "pending" | "ready_for_pickup";
+};
+
 type Notice = {
   type: "success" | "error";
   text: string;
@@ -120,6 +125,7 @@ export default function FavoritesPage() {
   const [searchInput, setSearchInput] = useState("");
   const [favorites, setFavorites] = useState<FavoriteBook[]>([]);
   const [catalogBooks, setCatalogBooks] = useState<Book[]>([]);
+  const [reservedBookIds, setReservedBookIds] = useState<Set<string>>(new Set());
   const [activeAction, setActiveAction] = useState<string | null>(null);
 
   useEffect(() => {
@@ -174,7 +180,7 @@ export default function FavoritesPage() {
         setIsLiveSyncing(true);
       }
 
-      const [favoritesResult, catalogResult] = await Promise.all([
+      const [favoritesResult, catalogResult, reservationsResult] = await Promise.all([
         supabase
           .from("bookmarks")
           .select(
@@ -188,7 +194,12 @@ export default function FavoritesPage() {
             "id,isbn,title,subtitle,description,publisher,language,publication_year,publication_date,cover_image_url,available_copies,total_copies,tags,book_authors(author_id,authors(id,name))"
           )
           .order("title", { ascending: true })
-          .limit(240)
+          .limit(240),
+        supabase
+          .from("reservations")
+          .select("book_id,status")
+          .eq("user_id", session.user.id)
+          .in("status", ["pending", "ready_for_pickup"])
       ]);
 
       if (favoritesResult.error) {
@@ -203,7 +214,14 @@ export default function FavoritesPage() {
         setCatalogBooks((catalogResult.data ?? []) as Book[]);
       }
 
-      if (!favoritesResult.error && !catalogResult.error) {
+      if (reservationsResult.error) {
+        setNotice({ type: "error", text: reservationsResult.error.message });
+      } else {
+        const activeReservations = (reservationsResult.data ?? []) as ActiveReservation[];
+        setReservedBookIds(new Set(activeReservations.map((reservation) => reservation.book_id)));
+      }
+
+      if (!favoritesResult.error && !catalogResult.error && !reservationsResult.error) {
         setNotice(null);
       }
 
@@ -245,6 +263,11 @@ export default function FavoritesPage() {
         { event: "*", schema: "public", table: "bookmarks", filter: `user_id=eq.${session.user.id}` },
         queueLiveRefresh
       )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "reservations", filter: `user_id=eq.${session.user.id}` },
+        queueLiveRefresh
+      )
       .on("postgres_changes", { event: "*", schema: "public", table: "books" }, queueLiveRefresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "book_authors" }, queueLiveRefresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "authors" }, queueLiveRefresh)
@@ -283,6 +306,19 @@ export default function FavoritesPage() {
       })
       .slice(0, 12);
   }, [catalogBooks, favoriteBookIds, searchInput]);
+
+  const reservedFavoritesCount = useMemo(
+    () => favorites.filter((entry) => reservedBookIds.has(entry.book.id)).length,
+    [favorites, reservedBookIds]
+  );
+
+  const readyToReserveCount = useMemo(
+    () =>
+      favorites.filter(
+        (entry) => entry.book.available_copies > 0 && !reservedBookIds.has(entry.book.id)
+      ).length,
+    [favorites, reservedBookIds]
+  );
 
   const handleAddFavorite = async (bookId: string) => {
     if (!session?.user.id) return;
@@ -409,6 +445,25 @@ export default function FavoritesPage() {
       onNavigate={(route) => navigate(`/${route}`)}
       onSignOut={handleSignOut}
     >
+      <section className="workspace-summary-strip" aria-label="Favorites overview">
+        <article className="discover-stat-card">
+          <span>Saved Books</span>
+          <strong>{favorites.length}</strong>
+        </article>
+        <article className="discover-stat-card">
+          <span>Ready To Reserve</span>
+          <strong>{readyToReserveCount}</strong>
+        </article>
+        <article className="discover-stat-card">
+          <span>Already Reserved</span>
+          <strong>{reservedFavoritesCount}</strong>
+        </article>
+        <article className="discover-stat-card">
+          <span>Suggestions</span>
+          <strong>{catalogSuggestions.length}</strong>
+        </article>
+      </section>
+
       <section className="discover-section" aria-label="Saved favorites">
         <header className="discover-section-head">
           <h2>Saved Favorites</h2>
@@ -421,6 +476,15 @@ export default function FavoritesPage() {
           <div className="discover-results-grid">
             {favorites.map((entry) => {
               const authors = normalizeAuthors(entry.book.book_authors);
+              const isReserved = reservedBookIds.has(entry.book.id);
+              const availabilityClass =
+                entry.book.available_copies > 0 ? "available" : entry.book.total_copies > 0 ? "borrowed" : "reserved";
+              const availabilityLabel =
+                entry.book.available_copies > 0
+                  ? "Available now"
+                  : entry.book.total_copies > 0
+                  ? "Borrowed"
+                  : "Reserved";
               return (
                 <article
                   key={entry.book.id}
@@ -446,7 +510,12 @@ export default function FavoritesPage() {
                   <div className="discover-result-content">
                     <div className="discover-result-head">
                       <h3>{entry.book.title}</h3>
-                      <span className="availability-pill available">Saved</span>
+                      <div className="favorite-pill-row">
+                        <span className="availability-pill available">Saved</span>
+                        <span className={`availability-pill ${isReserved ? "reserved" : availabilityClass}`}>
+                          {isReserved ? "Your reservation active" : availabilityLabel}
+                        </span>
+                      </div>
                     </div>
 
                     <div className="discover-book-meta-grid">
@@ -487,9 +556,13 @@ export default function FavoritesPage() {
                           navigate("/reservations");
                         }}
                         onKeyDown={(event) => event.stopPropagation()}
-                        disabled={entry.book.available_copies <= 0}
+                        disabled={entry.book.available_copies <= 0 || isReserved}
                       >
-                        {entry.book.available_copies <= 0 ? "Unavailable" : "Reserve"}
+                        {entry.book.available_copies <= 0
+                          ? "Unavailable"
+                          : isReserved
+                          ? "Reserved"
+                          : "Reserve"}
                       </button>
                     </div>
                   </div>
