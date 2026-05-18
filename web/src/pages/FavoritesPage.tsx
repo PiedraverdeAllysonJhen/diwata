@@ -12,6 +12,11 @@ import {
   normalizeAuthors
 } from "../lib/bookMetadata";
 
+type RawCategoryRelation = {
+  category_id: string;
+  categories: { id: string; name: string } | { id: string; name: string }[] | null;
+};
+
 type Book = {
   id: string;
   isbn: string | null;
@@ -27,6 +32,7 @@ type Book = {
   total_copies: number;
   tags: string[] | null;
   book_authors: RawAuthorRelation[] | null;
+  book_categories: RawCategoryRelation[] | null;
 };
 
 type BookmarkRow = {
@@ -38,6 +44,13 @@ type BookmarkRow = {
 type FavoriteBook = {
   bookmarkedAt: string;
   book: Book;
+  categories: string[];
+  authors: string[];
+};
+
+type FavoriteShelf = {
+  name: string;
+  items: FavoriteBook[];
 };
 
 type ActiveReservation = {
@@ -89,9 +102,38 @@ function getBookMonogram(title: string): string {
   return letters || "BK";
 }
 
-function getToneClass(seed: string): string {
-  const hash = Array.from(seed).reduce((acc, char) => acc + char.charCodeAt(0), 0);
-  return `tone-${(hash % 5) + 1}`;
+function getToneClasses(seed: string) {
+  const tones = [
+    "from-emerald-800 via-emerald-700 to-teal-600",
+    "from-slate-800 via-slate-700 to-emerald-700",
+    "from-green-900 via-emerald-700 to-lime-600",
+    "from-teal-800 via-cyan-700 to-emerald-600"
+  ] as const;
+
+  const hash = Array.from(seed).reduce((accumulator, character) => accumulator + character.charCodeAt(0), 0);
+  return tones[hash % tones.length];
+}
+
+function normalizeCategories(relations: RawCategoryRelation[] | null): string[] {
+  if (!relations || relations.length === 0) return [];
+
+  const values = new Set<string>();
+
+  for (const relation of relations) {
+    const categories = relation.categories;
+    if (!categories) continue;
+
+    if (Array.isArray(categories)) {
+      for (const item of categories) {
+        if (item.name) values.add(item.name);
+      }
+      continue;
+    }
+
+    if (categories.name) values.add(categories.name);
+  }
+
+  return Array.from(values).sort((left, right) => left.localeCompare(right));
 }
 
 function onCardKeyDown(event: KeyboardEvent<HTMLElement>, onActivate: () => void) {
@@ -104,14 +146,129 @@ function onCardKeyDown(event: KeyboardEvent<HTMLElement>, onActivate: () => void
 function normalizeBookmarkRows(rows: BookmarkRow[]): FavoriteBook[] {
   return rows
     .map((row) => {
-      const book = Array.isArray(row.books) ? row.books[0] : row.books;
+      const book = Array.isArray(row.books) ? row.books[0] ?? null : row.books;
       if (!book) return null;
+
       return {
         bookmarkedAt: row.created_at,
-        book
+        book,
+        categories: normalizeCategories(book.book_categories),
+        authors: normalizeAuthors(book.book_authors)
       };
     })
     .filter((entry): entry is FavoriteBook => entry !== null);
+}
+
+function FavoriteBookCard({
+  activeAction,
+  entry,
+  isReserved,
+  onOpenDetails,
+  onOpenReservations,
+  onRemove
+}: {
+  activeAction: string | null;
+  entry: FavoriteBook;
+  isReserved: boolean;
+  onOpenDetails: () => void;
+  onOpenReservations: () => void;
+  onRemove: () => void;
+}) {
+  const canReserve = entry.book.available_copies > 0 && !isReserved;
+
+  return (
+    <article
+      className="group flex h-full cursor-pointer flex-col gap-4 rounded-[1.35rem] border border-slate-200 bg-white p-4 shadow-[0_16px_36px_rgba(15,23,42,0.06)] transition hover:-translate-y-0.5 hover:border-emerald-200 hover:shadow-[0_20px_44px_rgba(15,23,42,0.09)]"
+      role="button"
+      tabIndex={0}
+      onClick={onOpenDetails}
+      onKeyDown={(event) => onCardKeyDown(event, onOpenDetails)}
+    >
+      <div className="flex items-start gap-4">
+        <div
+          className={`relative flex h-24 w-16 shrink-0 items-center justify-center overflow-hidden rounded-md bg-gradient-to-br ${getToneClasses(
+            entry.book.id
+          )} text-sm font-semibold tracking-[0.2em] text-white shadow-sm ring-1 ring-slate-200/80`}
+        >
+          {entry.book.cover_image_url ? (
+            <>
+              <img
+                src={entry.book.cover_image_url}
+                alt={`${entry.book.title} cover`}
+                loading="lazy"
+                className="absolute inset-0 h-full w-full object-cover"
+              />
+              <div className="absolute inset-0 bg-gradient-to-b from-slate-950/5 via-slate-950/15 to-slate-950/35" />
+            </>
+          ) : (
+            <span className="relative z-10">{getBookMonogram(entry.book.title)}</span>
+          )}
+        </div>
+
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div className="min-w-0">
+              <h3 className="line-clamp-2 text-sm font-semibold tracking-tight text-slate-900">{entry.book.title}</h3>
+              <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500">
+                {entry.book.subtitle ?? entry.book.publisher ?? "Saved catalog title"}
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-600">
+                Saved
+              </span>
+              <span
+                className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] ${
+                  isReserved
+                    ? "border-rose-200 bg-rose-50 text-rose-700"
+                    : entry.book.available_copies > 0
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                    : "border-amber-200 bg-amber-50 text-amber-700"
+                }`}
+              >
+                {isReserved ? "Reserved" : entry.book.available_copies > 0 ? "Available" : "Unavailable"}
+              </span>
+            </div>
+          </div>
+
+          <div className="mt-3 space-y-1.5 text-xs text-slate-500">
+            <p className="line-clamp-2 text-slate-600">By {formatAuthorLine(entry.authors)}</p>
+            <p>{formatPublicationLabel(entry.book.publication_date, entry.book.publication_year)}</p>
+            <p>{entry.book.language ?? "Language not set"}</p>
+            <p>{entry.book.available_copies} available of {entry.book.total_copies}</p>
+            <p>Saved on {formatDate(entry.bookmarkedAt)}</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-emerald-200 hover:text-emerald-700"
+          onClick={(event) => {
+            event.stopPropagation();
+            onRemove();
+          }}
+          onKeyDown={(event) => event.stopPropagation()}
+          disabled={activeAction === `remove-${entry.book.id}`}
+        >
+          {activeAction === `remove-${entry.book.id}` ? "Removing..." : "Remove"}
+        </button>
+        <button
+          type="button"
+          className="rounded-xl bg-emerald-700 px-3 py-2 text-xs font-semibold text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-55"
+          onClick={(event) => {
+            event.stopPropagation();
+            onOpenReservations();
+          }}
+          onKeyDown={(event) => event.stopPropagation()}
+          disabled={!canReserve}
+        >
+          {isReserved ? "Reserved" : canReserve ? "Reserve" : "Unavailable"}
+        </button>
+      </div>
+    </article>
+  );
 }
 
 export default function FavoritesPage() {
@@ -122,9 +279,7 @@ export default function FavoritesPage() {
   const [isLiveSyncing, setIsLiveSyncing] = useState(false);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
-  const [searchInput, setSearchInput] = useState("");
   const [favorites, setFavorites] = useState<FavoriteBook[]>([]);
-  const [catalogBooks, setCatalogBooks] = useState<Book[]>([]);
   const [reservedBookIds, setReservedBookIds] = useState<Set<string>>(new Set());
   const [activeAction, setActiveAction] = useState<string | null>(null);
 
@@ -180,21 +335,14 @@ export default function FavoritesPage() {
         setIsLiveSyncing(true);
       }
 
-      const [favoritesResult, catalogResult, reservationsResult] = await Promise.all([
+      const [favoritesResult, reservationsResult] = await Promise.all([
         supabase
           .from("bookmarks")
           .select(
-            "book_id,created_at,books(id,isbn,title,subtitle,description,publisher,language,publication_year,publication_date,cover_image_url,available_copies,total_copies,tags,book_authors(author_id,authors(id,name)))"
+            "book_id,created_at,books(id,isbn,title,subtitle,description,publisher,language,publication_year,publication_date,cover_image_url,available_copies,total_copies,tags,book_authors(author_id,authors(id,name)),book_categories(category_id,categories(id,name)))"
           )
           .eq("user_id", session.user.id)
           .order("created_at", { ascending: false }),
-        supabase
-          .from("books")
-          .select(
-            "id,isbn,title,subtitle,description,publisher,language,publication_year,publication_date,cover_image_url,available_copies,total_copies,tags,book_authors(author_id,authors(id,name))"
-          )
-          .order("title", { ascending: true })
-          .limit(240),
         supabase
           .from("reservations")
           .select("book_id,status")
@@ -208,12 +356,6 @@ export default function FavoritesPage() {
         setFavorites(normalizeBookmarkRows((favoritesResult.data ?? []) as BookmarkRow[]));
       }
 
-      if (catalogResult.error) {
-        setNotice({ type: "error", text: catalogResult.error.message });
-      } else {
-        setCatalogBooks((catalogResult.data ?? []) as Book[]);
-      }
-
       if (reservationsResult.error) {
         setNotice({ type: "error", text: reservationsResult.error.message });
       } else {
@@ -221,7 +363,7 @@ export default function FavoritesPage() {
         setReservedBookIds(new Set(activeReservations.map((reservation) => reservation.book_id)));
       }
 
-      if (!favoritesResult.error && !catalogResult.error && !reservationsResult.error) {
+      if (!favoritesResult.error && !reservationsResult.error) {
         setNotice(null);
       }
 
@@ -269,6 +411,8 @@ export default function FavoritesPage() {
         queueLiveRefresh
       )
       .on("postgres_changes", { event: "*", schema: "public", table: "books" }, queueLiveRefresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "book_categories" }, queueLiveRefresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "categories" }, queueLiveRefresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "book_authors" }, queueLiveRefresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "authors" }, queueLiveRefresh)
       .subscribe();
@@ -281,31 +425,25 @@ export default function FavoritesPage() {
     };
   }, [session?.user.id, loadFavorites]);
 
-  const favoriteBookIds = useMemo(() => new Set(favorites.map((entry) => entry.book.id)), [favorites]);
+  const favoriteShelves = useMemo<FavoriteShelf[]>(() => {
+    const groupedFavorites = new Map<string, FavoriteBook[]>();
 
-  const catalogSuggestions = useMemo(() => {
-    const keyword = searchInput.trim().toLowerCase();
+    for (const entry of favorites) {
+      const categoryNames = entry.categories.length > 0 ? entry.categories : ["Uncategorized"];
 
-    return catalogBooks
-      .filter((book) => !favoriteBookIds.has(book.id))
-      .filter((book) => {
-        if (!keyword) return true;
-        const values = [
-          book.title,
-          book.subtitle ?? "",
-          book.language ?? "",
-          book.publication_year ? String(book.publication_year) : "",
-          book.publication_date ?? "",
-          book.isbn ?? "",
-          book.publisher ?? "",
-          normalizeAuthors(book.book_authors).join(" "),
-          (book.tags ?? []).join(" ")
-        ];
+      for (const categoryName of categoryNames) {
+        const existingItems = groupedFavorites.get(categoryName) ?? [];
+        groupedFavorites.set(categoryName, [...existingItems, entry]);
+      }
+    }
 
-        return values.some((value) => value.toLowerCase().includes(keyword));
-      })
-      .slice(0, 12);
-  }, [catalogBooks, favoriteBookIds, searchInput]);
+    return Array.from(groupedFavorites.entries())
+      .map(([name, items]) => ({
+        name,
+        items: [...items].sort((left, right) => left.book.title.localeCompare(right.book.title))
+      }))
+      .sort((left, right) => right.items.length - left.items.length || left.name.localeCompare(right.name));
+  }, [favorites]);
 
   const reservedFavoritesCount = useMemo(
     () => favorites.filter((entry) => reservedBookIds.has(entry.book.id)).length,
@@ -313,34 +451,9 @@ export default function FavoritesPage() {
   );
 
   const readyToReserveCount = useMemo(
-    () =>
-      favorites.filter(
-        (entry) => entry.book.available_copies > 0 && !reservedBookIds.has(entry.book.id)
-      ).length,
+    () => favorites.filter((entry) => entry.book.available_copies > 0 && !reservedBookIds.has(entry.book.id)).length,
     [favorites, reservedBookIds]
   );
-
-  const handleAddFavorite = async (bookId: string) => {
-    if (!session?.user.id) return;
-
-    setActiveAction(`add-${bookId}`);
-    setNotice(null);
-
-    const { error } = await supabase.from("bookmarks").insert({
-      user_id: session.user.id,
-      book_id: bookId
-    });
-
-    if (error) {
-      setNotice({ type: "error", text: error.message });
-      setActiveAction(null);
-      return;
-    }
-
-    setNotice({ type: "success", text: "Book added to favorites." });
-    await loadFavorites("live");
-    setActiveAction(null);
-  };
 
   const handleRemoveFavorite = async (bookId: string) => {
     if (!session?.user.id) return;
@@ -348,11 +461,7 @@ export default function FavoritesPage() {
     setActiveAction(`remove-${bookId}`);
     setNotice(null);
 
-    const { error } = await supabase
-      .from("bookmarks")
-      .delete()
-      .eq("user_id", session.user.id)
-      .eq("book_id", bookId);
+    const { error } = await supabase.from("bookmarks").delete().eq("user_id", session.user.id).eq("book_id", bookId);
 
     if (error) {
       setNotice({ type: "error", text: error.message });
@@ -403,7 +512,7 @@ export default function FavoritesPage() {
       activeRoute="favorites"
       activeMenuKey="favorite"
       title="Favorite Books"
-      description="Save titles you want to revisit and reserve them faster later."
+      description="Saved titles are now grouped by category shelves so the page feels curated instead of crowded."
       userEmail={userEmail}
       notifier={{
         notifications: notifier.notifications,
@@ -416,7 +525,7 @@ export default function FavoritesPage() {
       }}
       sidebarStats={[
         { label: "Favorites", value: String(favorites.length) },
-        { label: "Suggestions", value: String(catalogSuggestions.length) }
+        { label: "Shelves", value: String(favoriteShelves.length) }
       ]}
       sidebarAction={{
         label: isFetching ? "Refreshing..." : "Refresh Data",
@@ -445,198 +554,102 @@ export default function FavoritesPage() {
       onNavigate={(route) => navigate(`/${route}`)}
       onSignOut={handleSignOut}
     >
-      <section className="workspace-summary-strip" aria-label="Favorites overview">
-        <article className="discover-stat-card">
-          <span>Saved Books</span>
-          <strong>{favorites.length}</strong>
-        </article>
-        <article className="discover-stat-card">
-          <span>Ready To Reserve</span>
-          <strong>{readyToReserveCount}</strong>
-        </article>
-        <article className="discover-stat-card">
-          <span>Already Reserved</span>
-          <strong>{reservedFavoritesCount}</strong>
-        </article>
-        <article className="discover-stat-card">
-          <span>Suggestions</span>
-          <strong>{catalogSuggestions.length}</strong>
-        </article>
-      </section>
+      <div className="space-y-5">
+        <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4" aria-label="Favorites overview">
+          <article className="rounded-[1.35rem] border border-slate-200 bg-white/95 p-4 shadow-[0_16px_36px_rgba(15,23,42,0.06)]">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Saved Books</p>
+            <strong className="mt-3 block text-3xl font-semibold tracking-tight text-slate-900">{favorites.length}</strong>
+            <p className="mt-2 text-sm text-slate-500">Titles you have bookmarked for quicker return visits.</p>
+          </article>
+          <article className="rounded-[1.35rem] border border-slate-200 bg-white/95 p-4 shadow-[0_16px_36px_rgba(15,23,42,0.06)]">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Category Shelves</p>
+            <strong className="mt-3 block text-3xl font-semibold tracking-tight text-slate-900">{favoriteShelves.length}</strong>
+            <p className="mt-2 text-sm text-slate-500">Grouped by catalog category to keep saved books easy to scan.</p>
+          </article>
+          <article className="rounded-[1.35rem] border border-slate-200 bg-white/95 p-4 shadow-[0_16px_36px_rgba(15,23,42,0.06)]">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Ready To Reserve</p>
+            <strong className="mt-3 block text-3xl font-semibold tracking-tight text-slate-900">{readyToReserveCount}</strong>
+            <p className="mt-2 text-sm text-slate-500">Favorites with an available copy and no active reservation yet.</p>
+          </article>
+          <article className="rounded-[1.35rem] border border-slate-200 bg-white/95 p-4 shadow-[0_16px_36px_rgba(15,23,42,0.06)]">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Already Reserved</p>
+            <strong className="mt-3 block text-3xl font-semibold tracking-tight text-slate-900">{reservedFavoritesCount}</strong>
+            <p className="mt-2 text-sm text-slate-500">Saved titles that already have an active reservation on your account.</p>
+          </article>
+        </section>
 
-      <section className="discover-section" aria-label="Saved favorites">
-        <header className="discover-section-head">
-          <h2>Saved Favorites</h2>
-          <p className="discover-inline-meta">{favorites.length} saved books</p>
-        </header>
+        <section className="rounded-[1.8rem] border border-slate-200 bg-white/95 p-5 shadow-[0_20px_50px_rgba(15,23,42,0.06)]">
+          <div className="mb-5 flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-emerald-700">Favorite Shelves</p>
+              <h2 className="mt-2 text-xl font-semibold tracking-tight text-slate-900">Favorites grouped by category</h2>
+              <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500">
+                Suggestions and duplicate search controls are removed here so the page stays focused on the books you already saved.
+              </p>
+            </div>
+            <p className="text-sm font-medium text-slate-500">{favoriteShelves.length} active shelves</p>
+          </div>
 
-        {favorites.length === 0 ? (
-          <p className="empty-state">No favorite books yet. Add titles from suggestions below.</p>
-        ) : (
-          <div className="discover-results-grid">
-            {favorites.map((entry) => {
-              const authors = normalizeAuthors(entry.book.book_authors);
-              const isReserved = reservedBookIds.has(entry.book.id);
-              const availabilityClass =
-                entry.book.available_copies > 0 ? "available" : entry.book.total_copies > 0 ? "borrowed" : "reserved";
-              const availabilityLabel =
-                entry.book.available_copies > 0
-                  ? "Available now"
-                  : entry.book.total_copies > 0
-                  ? "Borrowed"
-                  : "Reserved";
-              return (
-                <article
-                  key={entry.book.id}
-                  className="discover-result-card book-card-link"
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => navigate(`/books/${entry.book.id}`)}
-                  onKeyDown={(event) => onCardKeyDown(event, () => navigate(`/books/${entry.book.id}`))}
-                >
-                  <div
-                    className={`discover-result-cover ${getToneClass(entry.book.id)} ${entry.book.cover_image_url ? "has-image" : ""}`.trim()}
-                    style={
-                      entry.book.cover_image_url
-                        ? {
-                            backgroundImage: `linear-gradient(165deg, rgba(7, 66, 52, 0.42), rgba(7, 66, 52, 0.08)), url(${entry.book.cover_image_url})`
-                          }
-                        : undefined
-                    }
+          {favoriteShelves.length === 0 ? (
+            <div className="rounded-[1.6rem] border border-dashed border-slate-200 bg-slate-50 px-5 py-10 text-center text-sm text-slate-500">
+              No favorite books yet. Save titles from Discover to build your shelves.
+            </div>
+          ) : (
+            <div className="space-y-5">
+              {favoriteShelves.map((shelf) => {
+                const shelfReservedCount = shelf.items.filter((entry) => reservedBookIds.has(entry.book.id)).length;
+
+                return (
+                  <article
+                    key={shelf.name}
+                    className="rounded-[1.5rem] border border-slate-200 bg-slate-50/70 p-4"
                   >
-                    {!entry.book.cover_image_url ? <span>{getBookMonogram(entry.book.title)}</span> : null}
-                  </div>
-
-                  <div className="discover-result-content">
-                    <div className="discover-result-head">
-                      <h3>{entry.book.title}</h3>
-                      <div className="favorite-pill-row">
-                        <span className="availability-pill available">Saved</span>
-                        <span className={`availability-pill ${isReserved ? "reserved" : availabilityClass}`}>
-                          {isReserved ? "Your reservation active" : availabilityLabel}
+                    <div className="mb-4 flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+                      <div>
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Catalog Category</p>
+                        <h3 className="mt-1 text-lg font-semibold tracking-tight text-slate-900">{shelf.name}</h3>
+                        <p className="mt-1 text-sm text-slate-500">
+                          {shelf.items.length} saved {shelf.items.length === 1 ? "book" : "books"} in this shelf.
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap gap-2 text-xs font-medium text-slate-500">
+                        <span className="rounded-full border border-slate-200 bg-white px-3 py-1.5">
+                          {shelfReservedCount} reserved
+                        </span>
+                        <span className="rounded-full border border-slate-200 bg-white px-3 py-1.5">
+                          {shelf.items.length - shelfReservedCount} available to review
                         </span>
                       </div>
                     </div>
 
-                    <div className="discover-book-meta-grid">
-                      <p className="discover-result-meta"><strong>Author:</strong> {formatAuthorLine(authors)}</p>
-                      <p className="discover-result-meta"><strong>Publish date:</strong> {formatPublicationLabel(entry.book.publication_date, entry.book.publication_year)}</p>
-                      <p className="discover-result-meta"><strong>ISBN:</strong> {entry.book.isbn ?? "N/A"}</p>
-                      <p className="discover-result-meta"><strong>Publisher:</strong> {entry.book.publisher ?? "N/A"}</p>
-                      <p className="discover-result-meta"><strong>Language:</strong> {entry.book.language ?? "N/A"}</p>
-                      <p className="discover-result-meta"><strong>Copies:</strong> {entry.book.available_copies} available / {entry.book.total_copies} total</p>
-                      <p className="discover-result-meta"><strong>Subtitle:</strong> {entry.book.subtitle ?? "N/A"}</p>
-                      <p className="discover-result-meta"><strong>Tags:</strong> {(entry.book.tags ?? []).length > 0 ? (entry.book.tags ?? []).join(", ") : "None"}</p>
-                    </div>
-
-                    <p className="discover-result-description">
-                      <strong>Description:</strong> {entry.book.description ?? "No description provided."}
-                    </p>
-
-                    <p className="discover-result-meta">Saved on {formatDate(entry.bookmarkedAt)}</p>
-
-                    <div className="discover-result-actions">
-                      <button
-                        type="button"
-                        className="btn btn-soft btn-small"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          void handleRemoveFavorite(entry.book.id);
-                        }}
-                        onKeyDown={(event) => event.stopPropagation()}
-                        disabled={activeAction === `remove-${entry.book.id}`}
-                      >
-                        {activeAction === `remove-${entry.book.id}` ? "Removing..." : "Remove"}
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-primary btn-small"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          navigate("/reservations");
-                        }}
-                        onKeyDown={(event) => event.stopPropagation()}
-                        disabled={entry.book.available_copies <= 0 || isReserved}
-                      >
-                        {entry.book.available_copies <= 0
-                          ? "Unavailable"
-                          : isReserved
-                          ? "Reserved"
-                          : "Reserve"}
-                      </button>
-                    </div>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        )}
-      </section>
-
-      <section className="discover-section" aria-label="Catalog suggestions">
-        <header className="discover-section-head">
-          <h2>Add More Favorites</h2>
-        </header>
-
-        <label htmlFor="favorite-search" className="settings-field">
-          <span>Search catalog suggestions</span>
-          <input
-            id="favorite-search"
-            type="search"
-            value={searchInput}
-            onChange={(event) => setSearchInput(event.target.value)}
-            placeholder="Type title, author, language, or year"
-          />
-        </label>
-
-        {catalogSuggestions.length === 0 ? (
-          <p className="empty-state">No suggestions available right now.</p>
-        ) : (
-          <div className="discover-recommend-grid">
-            {catalogSuggestions.map((book) => (
-              <article
-                key={book.id}
-                className="discover-recommend-card book-card-link"
-                role="button"
-                tabIndex={0}
-                onClick={() => navigate(`/books/${book.id}`)}
-                onKeyDown={(event) => onCardKeyDown(event, () => navigate(`/books/${book.id}`))}
-              >
-                <div
-                  className={`discover-book-cover ${getToneClass(book.id)} ${book.cover_image_url ? "has-image" : ""}`.trim()}
-                  style={
-                    book.cover_image_url
-                      ? {
-                          backgroundImage: `linear-gradient(165deg, rgba(7, 66, 52, 0.42), rgba(7, 66, 52, 0.08)), url(${book.cover_image_url})`
-                        }
-                      : undefined
-                  }
-                >
-                  {!book.cover_image_url ? <span>{getBookMonogram(book.title)}</span> : null}
-                </div>
-                <h3>{book.title}</h3>
-                <p>{book.subtitle ?? formatAuthorLine(normalizeAuthors(book.book_authors))}</p>
-                <div className="discover-recommend-meta">
-                  <span className="availability-pill available">Catalog</span>
-                  <button
-                    type="button"
-                    className="btn btn-soft btn-small"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      void handleAddFavorite(book.id);
-                    }}
-                    onKeyDown={(event) => event.stopPropagation()}
-                    disabled={activeAction === `add-${book.id}`}
-                  >
-                    {activeAction === `add-${book.id}` ? "Saving..." : "Add"}
-                  </button>
-                </div>
-              </article>
-            ))}
-          </div>
-        )}
-      </section>
+                    {shelf.items.length === 0 ? (
+                      <div className="rounded-[1.2rem] border border-dashed border-slate-200 bg-white px-4 py-8 text-center text-sm text-slate-500">
+                        No favorite books in this category yet.
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                        {shelf.items.map((entry) => (
+                          <FavoriteBookCard
+                            key={`${shelf.name}-${entry.book.id}`}
+                            activeAction={activeAction}
+                            entry={entry}
+                            isReserved={reservedBookIds.has(entry.book.id)}
+                            onOpenDetails={() => navigate(`/books/${entry.book.id}`)}
+                            onOpenReservations={() => navigate("/reservations")}
+                            onRemove={() => {
+                              void handleRemoveFavorite(entry.book.id);
+                            }}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </article>
+                );
+              })}
+            </div>
+          )}
+        </section>
+      </div>
     </LibraryWorkspaceLayout>
   );
 }
-

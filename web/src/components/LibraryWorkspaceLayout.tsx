@@ -103,7 +103,7 @@ export default function LibraryWorkspaceLayout({
   activeMenuKey,
   title,
   description,
-  releaseCode = "DW.010.003",
+  releaseCode,
   userEmail,
   notifier,
   sidebarStats,
@@ -210,7 +210,7 @@ export default function LibraryWorkspaceLayout({
           <section className="discover-main">
             <header className="discover-header">
               <div>
-                <p className="eyebrow">{releaseCode}</p>
+                {releaseCode ? <p className="eyebrow">{releaseCode}</p> : null}
                 <h1>{title}</h1>
                 <p>{description}</p>
               </div>

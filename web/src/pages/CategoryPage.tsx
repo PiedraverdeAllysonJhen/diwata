@@ -1,10 +1,11 @@
-import { KeyboardEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { Session } from "@supabase/supabase-js";
 import { useNavigate } from "react-router-dom";
-import { hasSupabaseEnv, supabase } from "../lib/supabase";
+import CatalogBookCard from "../components/CatalogBookCard";
 import PortalLiveIndicator from "../components/PortalLiveIndicator";
 import LibraryWorkspaceLayout from "../components/LibraryWorkspaceLayout";
 import { useReservationNotifier } from "../hooks/useReservationNotifier";
+import { hasSupabaseEnv, supabase } from "../lib/supabase";
 import {
   RawAuthorRelation,
   formatAuthorLine,
@@ -64,6 +65,11 @@ type CategoryRow = {
   name: string;
 };
 
+type ReservationHistoryRow = {
+  book_id: string;
+  status: "pending" | "ready_for_pickup" | "fulfilled" | "expired";
+};
+
 type LoadSource = "manual" | "live";
 type AvailabilityState = "available" | "borrowed" | "reserved";
 
@@ -73,10 +79,10 @@ type CategoryCount = {
   count: number;
   availableCount: number;
 };
-type ActiveReservation = {
-  id: string;
-  book_id: string;
-  status: "pending" | "ready_for_pickup";
+
+type Notice = {
+  type: "success" | "error";
+  text: string;
 };
 
 function normalizeCategories(relations: RawCategoryRelation[] | null): string[] {
@@ -98,7 +104,7 @@ function normalizeCategories(relations: RawCategoryRelation[] | null): string[] 
     if (categories.name) values.add(categories.name);
   }
 
-  return Array.from(values).sort((a, b) => a.localeCompare(b));
+  return Array.from(values).sort((left, right) => left.localeCompare(right));
 }
 
 function normalizeCopyStatuses(relations: RawCopyStatusRelation[] | null): string[] {
@@ -143,9 +149,8 @@ function getAvailabilityState(book: Pick<BookRecord, "copyStatuses" | "available
   if (statusSet.has("available")) return "available";
   if (statusSet.has("borrowed")) return "borrowed";
   if (statusSet.has("reserved")) return "reserved";
-
   if (book.availableCopies > 0) return "available";
-  if (book.totalCopies > 0 && book.availableCopies <= 0) return "borrowed";
+  if (book.totalCopies > 0) return "borrowed";
 
   return "reserved";
 }
@@ -154,14 +159,6 @@ function getAvailabilityLabel(status: AvailabilityState) {
   if (status === "available") return "Available";
   if (status === "borrowed") return "Borrowed";
   return "Reserved";
-}
-
-function getAvailabilityClass(status: AvailabilityState) {
-  return status;
-}
-
-function canReserveFromCategory(status: AvailabilityState) {
-  return status === "available";
 }
 
 function formatLastSync(value: string | null) {
@@ -177,27 +174,119 @@ function formatLastSync(value: string | null) {
   })}`;
 }
 
-function getBookMonogram(title: string): string {
-  const letters = title
-    .split(" ")
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part.charAt(0).toUpperCase())
-    .join("");
+function CategoryIcon({ name }: { name: string }) {
+  const normalized = name.toLowerCase();
 
-  return letters || "BK";
-}
-
-function getToneClass(seed: string): string {
-  const hash = Array.from(seed).reduce((acc, char) => acc + char.charCodeAt(0), 0);
-  return `tone-${(hash % 5) + 1}`;
-}
-
-function onCardKeyDown(event: KeyboardEvent<HTMLElement>, onActivate: () => void) {
-  if (event.key === "Enter" || event.key === " ") {
-    event.preventDefault();
-    onActivate();
+  if (normalized.includes("science") || normalized.includes("research")) {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5">
+        <path d="M9 3h6" />
+        <path d="M10 3v5l-5.5 8.8A3 3 0 0 0 7 21h10a3 3 0 0 0 2.5-4.2L14 8V3" />
+        <path d="M8.5 14h7" />
+      </svg>
+    );
   }
+
+  if (normalized.includes("history") || normalized.includes("culture")) {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5">
+        <path d="M6 4.5A2.5 2.5 0 0 1 8.5 2H20v16.5A2.5 2.5 0 0 0 17.5 16H6Z" />
+        <path d="M6 4.5V22" />
+        <path d="M10 7h6" />
+        <path d="M10 11h6" />
+      </svg>
+    );
+  }
+
+  if (normalized.includes("technology") || normalized.includes("computer")) {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5">
+        <rect x="3" y="4" width="18" height="12" rx="2" />
+        <path d="M8 20h8" />
+        <path d="M12 16v4" />
+      </svg>
+    );
+  }
+
+  if (normalized.includes("art") || normalized.includes("design") || normalized.includes("literature")) {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5">
+        <path d="M12 3c4 0 7 3.4 7 7.4 0 5.2-7 10.6-7 10.6S5 15.6 5 10.4C5 6.4 8 3 12 3Z" />
+        <circle cx="12" cy="10" r="2.2" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5">
+      <path d="M4 6.5A2.5 2.5 0 0 1 6.5 4H20v13.5A2.5 2.5 0 0 0 17.5 15H4Z" />
+      <path d="M4 6.5V20" />
+      <path d="M9 8h6" />
+      <path d="M9 12h4" />
+    </svg>
+  );
+}
+
+function CategoryIconButton({
+  active,
+  count,
+  name,
+  onClick
+}: {
+  active: boolean;
+  count: number;
+  name: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={name}
+      title={name}
+      className="relative flex w-[92px] flex-col items-center gap-1.5 text-center"
+    >
+      <span
+        className={`flex h-14 w-14 items-center justify-center rounded-2xl border transition ${
+          active
+            ? "border-emerald-600 bg-emerald-700 text-white shadow-lg shadow-emerald-700/25"
+            : "border-slate-200 bg-white text-slate-600 hover:border-emerald-200 hover:text-emerald-700"
+        }`}
+      >
+        <CategoryIcon name={name} />
+      </span>
+      <span className={`line-clamp-2 text-xs font-medium ${active ? "text-emerald-700" : "text-slate-600"}`}>
+        {name}
+      </span>
+      <span className="text-[11px] text-slate-400">{count}</span>
+      <span className="sr-only">{name}</span>
+    </button>
+  );
+}
+
+function SectionCard({
+  eyebrow,
+  title,
+  description,
+  children
+}: {
+  eyebrow: string;
+  title: string;
+  description: string;
+  children?: ReactNode;
+}) {
+  return (
+    <section className="rounded-[1.8rem] border border-slate-200 bg-white/95 p-5 shadow-[0_20px_50px_rgba(15,23,42,0.06)]">
+      <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-emerald-700">{eyebrow}</p>
+          <h2 className="mt-2 text-xl font-semibold tracking-tight text-slate-900">{title}</h2>
+          <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500">{description}</p>
+        </div>
+        {children}
+      </div>
+    </section>
+  );
 }
 
 export default function CategoryPage() {
@@ -207,11 +296,12 @@ export default function CategoryPage() {
   const [isFetching, setIsFetching] = useState(false);
   const [isLiveSyncing, setIsLiveSyncing] = useState(false);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
-  const [notice, setNotice] = useState("");
+  const [notice, setNotice] = useState<Notice | null>(null);
   const [books, setBooks] = useState<BookRecord[]>([]);
   const [categories, setCategories] = useState<CategoryRow[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [reservedBookIds, setReservedBookIds] = useState<Set<string>>(new Set());
+  const [borrowedHistoryBookIds, setBorrowedHistoryBookIds] = useState<Set<string>>(new Set());
   const [activeReserveBookId, setActiveReserveBookId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -256,77 +346,76 @@ export default function CategoryPage() {
     };
   }, [navigate]);
 
-  const loadData = useCallback(async (source: LoadSource = "manual") => {
-    if (source === "manual") {
-      setIsFetching(true);
-    } else {
-      setIsLiveSyncing(true);
-    }
+  const loadData = useCallback(
+    async (source: LoadSource = "manual") => {
+      if (!session?.user.id) return;
 
-    const [booksResult, categoriesResult, reservationsResult] = await Promise.all([
-      supabase
-        .from("books")
-        .select(
-          "id,isbn,title,subtitle,description,publisher,language,publication_year,publication_date,cover_image_url,available_copies,total_copies,tags,book_copies(status),book_categories(category_id,categories(id,name)),book_authors(author_id,authors(id,name))"
-        )
-        .order("title", { ascending: true })
-        .limit(300),
-      supabase.from("categories").select("id,name").order("name", { ascending: true }),
-      supabase
-        .from("reservations")
-        .select("id,book_id,status")
-        .eq("user_id", session?.user.id ?? "")
-        .in("status", ["pending", "ready_for_pickup"])
-    ]);
+      if (source === "manual") {
+        setIsFetching(true);
+      } else {
+        setIsLiveSyncing(true);
+      }
 
-    if (booksResult.error) {
-      setNotice(booksResult.error.message);
+      const [booksResult, categoriesResult, historyResult] = await Promise.all([
+        supabase
+          .from("books")
+          .select(
+            "id,isbn,title,subtitle,description,publisher,language,publication_year,publication_date,cover_image_url,available_copies,total_copies,tags,book_copies(status),book_categories(category_id,categories(id,name)),book_authors(author_id,authors(id,name))"
+          )
+          .order("title", { ascending: true })
+          .limit(300),
+        supabase.from("categories").select("id,name").order("name", { ascending: true }),
+        supabase
+          .from("reservations")
+          .select("book_id,status")
+          .eq("user_id", session.user.id)
+          .in("status", ["pending", "ready_for_pickup", "fulfilled", "expired"])
+      ]);
+
+      const firstError = booksResult.error ?? categoriesResult.error ?? historyResult.error;
+
+      if (firstError) {
+        setNotice({ type: "error", text: firstError.message });
+        if (source === "manual") {
+          setIsFetching(false);
+        } else {
+          setIsLiveSyncing(false);
+        }
+        return;
+      }
+
+      const reservationHistory = (historyResult.data ?? []) as ReservationHistoryRow[];
+      const activeReservationIds = new Set(
+        reservationHistory
+          .filter((entry) => entry.status === "pending" || entry.status === "ready_for_pickup")
+          .map((entry) => entry.book_id)
+      );
+      const borrowedBeforeIds = new Set(
+        reservationHistory
+          .filter((entry) => entry.status === "fulfilled" || entry.status === "expired")
+          .map((entry) => entry.book_id)
+      );
+
+      setBooks(((booksResult.data ?? []) as RawBookRecord[]).map(normalizeBook));
+      setCategories((categoriesResult.data ?? []) as CategoryRow[]);
+      setReservedBookIds(activeReservationIds);
+      setBorrowedHistoryBookIds(borrowedBeforeIds);
+      setNotice(null);
+      setLastSyncedAt(new Date().toISOString());
+
       if (source === "manual") {
         setIsFetching(false);
       } else {
         setIsLiveSyncing(false);
       }
-      return;
-    }
-
-    if (categoriesResult.error) {
-      setNotice(categoriesResult.error.message);
-      if (source === "manual") {
-        setIsFetching(false);
-      } else {
-        setIsLiveSyncing(false);
-      }
-      return;
-    }
-
-    if (reservationsResult.error) {
-      setNotice(reservationsResult.error.message);
-      if (source === "manual") {
-        setIsFetching(false);
-      } else {
-        setIsLiveSyncing(false);
-      }
-      return;
-    }
-
-    setBooks(((booksResult.data ?? []) as RawBookRecord[]).map(normalizeBook));
-    setCategories((categoriesResult.data ?? []) as CategoryRow[]);
-    const activeReservations = (reservationsResult.data ?? []) as ActiveReservation[];
-    setReservedBookIds(new Set(activeReservations.map((reservation) => reservation.book_id)));
-    setNotice("");
-    setLastSyncedAt(new Date().toISOString());
-
-    if (source === "manual") {
-      setIsFetching(false);
-    } else {
-      setIsLiveSyncing(false);
-    }
-  }, [session?.user.id]);
+    },
+    [session?.user.id]
+  );
 
   useEffect(() => {
     if (!session?.user.id) return;
     void loadData("manual");
-  }, [session?.user.id, loadData]);
+  }, [loadData, session?.user.id]);
 
   useEffect(() => {
     if (!session?.user.id || !hasSupabaseEnv) return;
@@ -350,6 +439,11 @@ export default function CategoryPage() {
       .on("postgres_changes", { event: "*", schema: "public", table: "book_authors" }, queueLiveRefresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "categories" }, queueLiveRefresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "authors" }, queueLiveRefresh)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "reservations", filter: `user_id=eq.${session.user.id}` },
+        queueLiveRefresh
+      )
       .subscribe();
 
     return () => {
@@ -358,10 +452,11 @@ export default function CategoryPage() {
       }
       void supabase.removeChannel(channel);
     };
-  }, [session?.user.id, loadData]);
+  }, [loadData, session?.user.id]);
 
   useEffect(() => {
     if (selectedCategory === "all") return;
+
     const categoryStillExists = categories.some((category) => category.name === selectedCategory);
     if (!categoryStillExists) {
       setSelectedCategory("all");
@@ -377,39 +472,46 @@ export default function CategoryPage() {
 
     for (const book of books) {
       for (const category of new Set(book.categories)) {
-        if (!counts.has(category)) {
-          counts.set(category, { total: 0, available: 0 });
-        }
-        const current = counts.get(category);
-        if (!current) continue;
-
-        current.total += 1;
+        const nextValue = counts.get(category) ?? { total: 0, available: 0 };
+        nextValue.total += 1;
         if (getAvailabilityState(book) === "available") {
-          current.available += 1;
+          nextValue.available += 1;
         }
+        counts.set(category, nextValue);
       }
     }
 
     return Array.from(counts.entries())
-      .map(([name, value]) => {
-        const category = categories.find((item) => item.name === name);
-        return {
-          id: category?.id ?? name,
-          name,
-          count: value.total,
-          availableCount: value.available
-        };
-      })
-      .filter((entry) => entry.count > 0)
-      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
-  }, [categories, books]);
+      .filter(([, value]) => value.total > 0)
+      .map(([name, value]) => ({
+        id: categories.find((category) => category.name === name)?.id ?? name,
+        name,
+        count: value.total,
+        availableCount: value.available
+      }))
+      .sort((left, right) => right.count - left.count || left.name.localeCompare(right.name));
+  }, [books, categories]);
 
   const filteredBooks = useMemo(() => {
     if (selectedCategory === "all") return books;
     return books.filter((book) => book.categories.includes(selectedCategory));
   }, [books, selectedCategory]);
 
-  const featuredCategories = useMemo(() => categoryCounts.slice(0, 12), [categoryCounts]);
+  const selectedCategorySummary = useMemo(() => {
+    if (selectedCategory === "all") {
+      return {
+        title: "All category shelves",
+        description: "Choose an icon to focus the grid, or keep the full institutional collection visible."
+      };
+    }
+
+    const activeEntry = categoryCounts.find((entry) => entry.name === selectedCategory);
+
+    return {
+      title: selectedCategory,
+      description: `${activeEntry?.availableCount ?? 0} available out of ${activeEntry?.count ?? 0} catalog titles.`
+    };
+  }, [categoryCounts, selectedCategory]);
 
   const handleSignOut = async () => {
     await supabase.auth.signOut();
@@ -420,7 +522,7 @@ export default function CategoryPage() {
     if (!session?.user.id) return;
 
     setActiveReserveBookId(bookId);
-    setNotice("");
+    setNotice(null);
 
     const { error } = await supabase.from("reservations").insert({
       user_id: session.user.id,
@@ -429,18 +531,19 @@ export default function CategoryPage() {
     });
 
     if (error) {
-      if (error.code === "23505" || /duplicate/i.test(error.message)) {
-        setReservedBookIds((previous) => new Set([...previous, bookId]));
-        setNotice("You already have an active reservation for this book.");
-      } else {
-        setNotice(error.message);
-      }
+      setNotice({
+        type: "error",
+        text:
+          error.code === "23505" || /duplicate/i.test(error.message)
+            ? "You already have an active reservation for this book."
+            : error.message
+      });
       setActiveReserveBookId(null);
       return;
     }
 
     setReservedBookIds((previous) => new Set([...previous, bookId]));
-    setNotice("");
+    setNotice({ type: "success", text: "Reservation created successfully." });
     setActiveReserveBookId(null);
   };
 
@@ -476,8 +579,8 @@ export default function CategoryPage() {
     <LibraryWorkspaceLayout
       activeRoute="category"
       activeMenuKey="category"
-      title="Book Categories"
-      description="Browse your full category collection and jump to available titles faster."
+      title="Category Browse"
+      description="Icon-driven category navigation and a cleaner large-grid browsing experience."
       userEmail={userEmail}
       notifier={{
         notifications: notifier.notifications,
@@ -499,155 +602,128 @@ export default function CategoryPage() {
         },
         disabled: isFetching
       }}
-      headerActions={
-        <div className="discover-inline-actions">
-          <button type="button" className="btn btn-soft btn-small" onClick={() => navigate("/search")}>
-            Open Discover
-          </button>
-          <button type="button" className="btn btn-soft btn-small" onClick={() => navigate("/reservations")}>
-            Open Reservations
-          </button>
-        </div>
-      }
       statusBar={
         <PortalLiveIndicator
           isSyncing={isLiveSyncing}
-          text={`${isLiveSyncing ? "Syncing live updates..." : "Live categories active"} | ${formatLastSync(lastSyncedAt)}`}
+          text={`${isLiveSyncing ? "Syncing categories..." : "Category browse synced"} | ${formatLastSync(lastSyncedAt)}`}
         />
       }
-      notice={notice ? <p className="status error portal-notice">{notice}</p> : undefined}
+      notice={notice ? <p className={`status ${notice.type} portal-notice`}>{notice.text}</p> : undefined}
       onNavigate={(route) => navigate(`/${route}`)}
       onSignOut={handleSignOut}
     >
-      <section className="discover-section" aria-label="Category overview">
-        <header className="discover-section-head">
-          <h2>Category Collection</h2>
-          <button type="button" className="discover-view-link" onClick={() => setSelectedCategory("all")}>
-            Show all
-          </button>
-        </header>
+      <div className="space-y-5">
+        <SectionCard
+          eyebrow="Category Navigation"
+          title="Choose a shelf icon and go straight to the books"
+          description="The category page now behaves like a focused browse studio instead of a text-heavy catalog dump."
+        >
+          <div className="text-xs text-slate-500">{filteredBooks.length} visible titles</div>
+        </SectionCard>
 
-        {featuredCategories.length === 0 ? (
-          <p className="empty-state">No categories found in the database yet.</p>
-        ) : (
-          <div className="discover-category-grid">
-            {featuredCategories.map((entry: CategoryCount) => {
-              const active = selectedCategory === entry.name;
-              return (
-                <button
-                  key={entry.id}
-                  type="button"
-                  className={`discover-category-card ${active ? "active" : ""}`.trim()}
-                  onClick={() => setSelectedCategory(active ? "all" : entry.name)}
-                >
-                  <strong>{entry.name}</strong>
-                  <span>
-                    {entry.count} titles | {entry.availableCount} available
-                  </span>
-                </button>
-              );
-            })}
+        <section className="rounded-[1.8rem] border border-slate-200 bg-white/95 p-5 shadow-[0_20px_50px_rgba(15,23,42,0.06)]">
+          <div className="flex flex-wrap gap-3">
+            <button
+              type="button"
+              onClick={() => setSelectedCategory("all")}
+              aria-label="All categories"
+              title="All categories"
+              className="flex w-[92px] flex-col items-center gap-1.5 text-center"
+            >
+              <span
+                className={`flex h-14 w-14 items-center justify-center rounded-2xl border transition ${
+                  selectedCategory === "all"
+                    ? "border-emerald-600 bg-emerald-700 text-white shadow-lg shadow-emerald-700/25"
+                    : "border-slate-200 bg-white text-slate-600 hover:border-emerald-200 hover:text-emerald-700"
+                }`}
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5">
+                  <path d="M4 6h16" />
+                  <path d="M4 12h16" />
+                  <path d="M4 18h16" />
+                </svg>
+              </span>
+              <span
+                className={`text-xs font-medium ${selectedCategory === "all" ? "text-emerald-700" : "text-slate-600"}`}
+              >
+                All
+              </span>
+              <span className="text-[11px] text-slate-400">{books.length}</span>
+              <span className="sr-only">All categories</span>
+            </button>
+
+            {categoryCounts.map((entry) => (
+              <CategoryIconButton
+                key={entry.id}
+                active={selectedCategory === entry.name}
+                count={entry.count}
+                name={entry.name}
+                onClick={() => setSelectedCategory(entry.name)}
+              />
+            ))}
           </div>
-        )}
-      </section>
+        </section>
 
-      <section className="discover-section" aria-label="Books in selected category">
-        <header className="discover-section-head">
-          <h2>{selectedCategory === "all" ? "All Catalog Titles" : `${selectedCategory} Titles`}</h2>
-          <p className="discover-inline-meta">{filteredBooks.length} books</p>
-        </header>
+        <section className="rounded-[1.8rem] border border-slate-200 bg-white/95 p-5 shadow-[0_20px_50px_rgba(15,23,42,0.06)]">
+          <div className="mb-5 flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-emerald-700">Filtered Shelf</p>
+              <h2 className="mt-2 text-xl font-semibold tracking-tight text-slate-900">{selectedCategorySummary.title}</h2>
+              <p className="mt-1 text-sm leading-6 text-slate-500">{selectedCategorySummary.description}</p>
+            </div>
+            {selectedCategory !== "all" ? (
+              <button
+                type="button"
+                onClick={() => setSelectedCategory("all")}
+                className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-emerald-200 hover:text-emerald-700"
+              >
+                Reset category
+              </button>
+            ) : null}
+          </div>
 
-        {filteredBooks.length === 0 ? (
-          <p className="empty-state">No books are available for this category yet.</p>
-        ) : (
-          <div className="discover-results-grid">
-            {filteredBooks.map((book) => {
-              const availabilityState = getAvailabilityState(book);
-              const availabilityClass = getAvailabilityClass(availabilityState);
-              return (
-                <article
-                  key={book.id}
-                  className="discover-result-card book-card-link"
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => navigate(`/books/${book.id}`)}
-                  onKeyDown={(event) => onCardKeyDown(event, () => navigate(`/books/${book.id}`))}
-                >
-                  <div
-                    className={`discover-result-cover ${getToneClass(book.id)} ${book.coverImageUrl ? "has-image" : ""}`.trim()}
-                    style={
-                      book.coverImageUrl
-                        ? {
-                            backgroundImage: `linear-gradient(165deg, rgba(7, 66, 52, 0.42), rgba(7, 66, 52, 0.08)), url(${book.coverImageUrl})`
-                          }
-                        : undefined
+          {filteredBooks.length === 0 ? (
+            <div className="rounded-[1.6rem] border border-dashed border-slate-200 bg-slate-50 px-5 py-10 text-center text-sm text-slate-500">
+              No books are available for this category right now.
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">
+              {filteredBooks.map((book) => {
+                const availability = getAvailabilityState(book);
+                const isReserved = reservedBookIds.has(book.id);
+                const isSaving = activeReserveBookId === book.id;
+                const canReserve = availability === "available";
+
+                return (
+                  <CatalogBookCard
+                    key={book.id}
+                    title={book.title}
+                    subtitle={book.subtitle ?? book.publisher ?? "Catalog record"}
+                    authorLine={`By ${formatAuthorLine(book.authors)}`}
+                    coverImageUrl={book.coverImageUrl}
+                    availabilityLabel={isReserved ? "Reserved" : getAvailabilityLabel(availability)}
+                    availabilityTone={isReserved ? "reserved" : availability}
+                    metaItems={[
+                      formatPublicationLabel(book.publicationDate, book.publicationYear),
+                      `${book.availableCopies} available of ${book.totalCopies}`,
+                      book.language ?? "Language not set"
+                    ]}
+                    actionLabel={
+                      !canReserve ? "Unavailable" : isReserved ? "Reserved" : isSaving ? "Saving..." : "Reserve"
                     }
-                  >
-                    {!book.coverImageUrl ? <span>{getBookMonogram(book.title)}</span> : null}
-                  </div>
-
-                  <div className="discover-result-content">
-                    <div className="discover-result-head">
-                      <h3>{book.title}</h3>
-                      <span className={`availability-pill ${availabilityClass}`}>
-                        {getAvailabilityLabel(availabilityState)}
-                      </span>
-                    </div>
-
-                    <div className="discover-book-meta-grid">
-                      <p className="discover-result-meta"><strong>Author:</strong> {formatAuthorLine(book.authors)}</p>
-                      <p className="discover-result-meta"><strong>Publish date:</strong> {formatPublicationLabel(book.publicationDate, book.publicationYear)}</p>
-                      <p className="discover-result-meta"><strong>ISBN:</strong> {book.isbn ?? "N/A"}</p>
-                      <p className="discover-result-meta"><strong>Publisher:</strong> {book.publisher ?? "N/A"}</p>
-                      <p className="discover-result-meta"><strong>Language:</strong> {book.language ?? "N/A"}</p>
-                      <p className="discover-result-meta"><strong>Copies:</strong> {book.availableCopies} available / {book.totalCopies} total</p>
-                      <p className="discover-result-meta"><strong>Subtitle:</strong> {book.subtitle ?? "N/A"}</p>
-                      <p className="discover-result-meta"><strong>Tags:</strong> {book.tags.length > 0 ? book.tags.join(", ") : "None"}</p>
-                    </div>
-
-                    <p className="discover-result-description">
-                      <strong>Description:</strong> {book.description ?? "No description provided."}
-                    </p>
-
-                    <div className="discover-result-actions">
-                      {(() => {
-                        const isReserved = reservedBookIds.has(book.id);
-                        const canReserve = canReserveFromCategory(availabilityState);
-                        const isSaving = activeReserveBookId === book.id;
-
-                        return (
-                          <button
-                            type="button"
-                            className="btn btn-primary btn-small"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              void handleReserveBook(book.id);
-                            }}
-                            onKeyDown={(event) => event.stopPropagation()}
-                            disabled={!canReserve || isReserved || isSaving}
-                          >
-                            {!canReserve
-                              ? "Unavailable right now"
-                              : isReserved
-                              ? "Reserved"
-                              : isSaving
-                              ? "Saving..."
-                              : "Reserve"}
-                          </button>
-                        );
-                      })()}
-                    </div>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        )}
-      </section>
+                    actionDisabled={!canReserve || isReserved || isSaving}
+                    hasBorrowedBefore={borrowedHistoryBookIds.has(book.id)}
+                    onOpenDetails={() => navigate(`/books/${book.id}`)}
+                    onAction={() => {
+                      void handleReserveBook(book.id);
+                    }}
+                  />
+                );
+              })}
+            </div>
+          )}
+        </section>
+      </div>
     </LibraryWorkspaceLayout>
   );
 }
-
-
-
-
