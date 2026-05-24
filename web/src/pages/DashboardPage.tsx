@@ -47,10 +47,8 @@ function normalizeReservationBook(book: ReservationRecord["books"]): Reservation
 
 function formatLastSync(value: string | null) {
   if (!value) return "Waiting for first sync";
-
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "Waiting for first sync";
-
   return `Last sync ${date.toLocaleTimeString(undefined, {
     hour: "numeric",
     minute: "2-digit",
@@ -60,10 +58,8 @@ function formatLastSync(value: string | null) {
 
 function formatDate(value: string | null) {
   if (!value) return "Not available";
-
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "Not available";
-
   return date.toLocaleDateString(undefined, {
     year: "numeric",
     month: "short",
@@ -78,7 +74,6 @@ function getBookMonogram(title: string) {
     .slice(0, 2)
     .map((part) => part.charAt(0).toUpperCase())
     .join("");
-
   return letters || "BK";
 }
 
@@ -89,7 +84,6 @@ function getToneClasses(seed: string) {
     "from-green-900 via-emerald-700 to-lime-600",
     "from-teal-800 via-cyan-700 to-emerald-600"
   ] as const;
-
   const hash = Array.from(seed).reduce((accumulator, character) => accumulator + character.charCodeAt(0), 0);
   return tones[hash % tones.length];
 }
@@ -104,9 +98,7 @@ function mapReservationStatusToBookStatus(status: LibraryReservationStatus): Boo
 function normalizeReservationRecord(record: ReservationRecord): LibraryBookItem | null {
   const linkedBook = normalizeReservationBook(record.books);
   if (!linkedBook?.id) return null;
-
   const status = mapReservationStatusToBookStatus(record.status);
-
   return {
     id: record.id,
     bookId: linkedBook.id,
@@ -127,7 +119,6 @@ function normalizeReservationRecord(record: ReservationRecord): LibraryBookItem 
 
 function StatusIcon({ status }: { status: BookStatus }) {
   const shared = "h-5 w-5";
-
   if (status === "pending") {
     return (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={shared}>
@@ -136,7 +127,6 @@ function StatusIcon({ status }: { status: BookStatus }) {
       </svg>
     );
   }
-
   if (status === "cancelled") {
     return (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={shared}>
@@ -146,7 +136,6 @@ function StatusIcon({ status }: { status: BookStatus }) {
       </svg>
     );
   }
-
   if (status === "returned") {
     return (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={shared}>
@@ -155,7 +144,6 @@ function StatusIcon({ status }: { status: BookStatus }) {
       </svg>
     );
   }
-
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={shared}>
       <path d="M12 9v4" />
@@ -166,18 +154,9 @@ function StatusIcon({ status }: { status: BookStatus }) {
 }
 
 function getStatusColors(status: BookStatus) {
-  if (status === "pending") {
-    return "border-emerald-200 bg-emerald-700 text-white shadow-lg shadow-emerald-700/20";
-  }
-
-  if (status === "cancelled") {
-    return "border-rose-200 bg-rose-50 text-rose-700";
-  }
-
-  if (status === "returned") {
-    return "border-sky-200 bg-sky-50 text-sky-700";
-  }
-
+  if (status === "pending") return "border-emerald-200 bg-emerald-700 text-white shadow-lg shadow-emerald-700/20";
+  if (status === "cancelled") return "border-rose-200 bg-rose-50 text-rose-700";
+  if (status === "returned") return "border-sky-200 bg-sky-50 text-sky-700";
   return "border-amber-200 bg-amber-50 text-amber-700";
 }
 
@@ -200,7 +179,6 @@ function StatusFilterButton({
   onClick: () => void;
 }) {
   const label = getStatusLabel(status);
-
   return (
     <button
       type="button"
@@ -210,10 +188,10 @@ function StatusFilterButton({
       className="flex w-[88px] flex-col items-center gap-1.5 text-center"
     >
       <span
-        className={`flex h-14 w-14 items-center justify-center rounded-2xl border transition ${
+        className={`flex h-14 w-14 items-center justify-center rounded-2xl transition ${
           active
-            ? "border-emerald-600 bg-emerald-700 text-white shadow-lg shadow-emerald-700/25"
-            : "border-slate-200 bg-white text-slate-600 hover:border-emerald-200 hover:text-emerald-700"
+            ? "bg-emerald-700 text-white shadow-lg shadow-emerald-700/25"
+            : "bg-white text-slate-600 hover:text-emerald-700"
         }`}
       >
         <StatusIcon status={status} />
@@ -246,7 +224,6 @@ function LibraryHistoryCard({ item }: { item: LibraryBookItem }) {
           <span className="relative z-10">{getBookMonogram(item.title)}</span>
         )}
       </div>
-
       <div className="min-w-0 flex-1">
         <h3 className="line-clamp-2 text-sm font-semibold tracking-tight text-slate-900">{item.title}</h3>
         <div className="mt-3 space-y-2">
@@ -314,18 +291,14 @@ export default function DashboardPage() {
         setIsBootstrapping(false);
         return;
       }
-
       const {
         data: { session: currentSession }
       } = await supabase.auth.getSession();
-
       if (!isMounted) return;
-
       if (!currentSession) {
         navigate("/", { replace: true });
         return;
       }
-
       setSession(currentSession);
       setIsBootstrapping(false);
     };
@@ -351,7 +324,6 @@ export default function DashboardPage() {
   const loadLibraryData = useCallback(
     async (source: LoadSource = "manual") => {
       if (!session?.user.id) return;
-
       if (source === "manual") {
         setIsFetching(true);
       } else {
@@ -371,13 +343,11 @@ export default function DashboardPage() {
         const nextItems = ((reservationsResult.data ?? []) as ReservationRecord[])
           .map(normalizeReservationRecord)
           .filter((item): item is LibraryBookItem => item !== null);
-
         setLibraryItems(nextItems);
         setNotice("");
       }
 
       setLastSyncedAt(new Date().toISOString());
-
       if (source === "manual") {
         setIsFetching(false);
       } else {
@@ -394,19 +364,13 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (!session?.user.id || !hasSupabaseEnv) return;
-
     let refreshTimeout: ReturnType<typeof setTimeout> | null = null;
-
     const queueLiveRefresh = () => {
-      if (refreshTimeout) {
-        window.clearTimeout(refreshTimeout);
-      }
-
+      if (refreshTimeout) window.clearTimeout(refreshTimeout);
       refreshTimeout = window.setTimeout(() => {
         void loadLibraryData("live");
       }, 320);
     };
-
     const channel = supabase
       .channel(`dashboard-realtime-${session.user.id}`)
       .on(
@@ -415,11 +379,8 @@ export default function DashboardPage() {
         queueLiveRefresh
       )
       .subscribe();
-
     return () => {
-      if (refreshTimeout) {
-        window.clearTimeout(refreshTimeout);
-      }
+      if (refreshTimeout) window.clearTimeout(refreshTimeout);
       void supabase.removeChannel(channel);
     };
   }, [loadLibraryData, session?.user.id]);
@@ -488,14 +449,13 @@ export default function DashboardPage() {
         onMarkAllRead: notifier.markAllAsRead
       }}
       sidebarStats={[
-        { label: "Records", value: String(libraryItems.length) },
-        { label: "Current Tab", value: getStatusLabel(activeStatus) }
+        { label: "Total Records", value: String(libraryItems.length) },
+        // FIXED: shows actionable pending count instead of repeating the active tab label
+        { label: "Pending", value: String(groupedItems.pending.length) }
       ]}
       sidebarAction={{
         label: isFetching ? "Refreshing..." : "Refresh Data",
-        onClick: () => {
-          void loadLibraryData("manual");
-        },
+        onClick: () => { void loadLibraryData("manual"); },
         disabled: isFetching
       }}
       headerActions={
@@ -568,7 +528,17 @@ export default function DashboardPage() {
             <p className="text-sm font-medium text-slate-500">{activeItems.length} records</p>
           </div>
 
-          {activeItems.length === 0 ? (
+          {/* ADDED: skeleton when first loading — only shown before any data arrives */}
+          {isFetching && libraryItems.length === 0 ? (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
+              {Array.from({ length: 6 }, (_, i) => (
+                <div
+                  key={i}
+                  className="animate-pulse rounded-[1.25rem] border border-slate-100 bg-slate-100 h-[168px]"
+                />
+              ))}
+            </div>
+          ) : activeItems.length === 0 ? (
             <div className="rounded-[1.6rem] border border-dashed border-slate-200 bg-slate-50 px-5 py-10 text-center text-sm text-slate-500">
               No records are available in this status right now.
             </div>

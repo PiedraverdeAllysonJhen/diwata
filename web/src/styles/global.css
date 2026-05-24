@@ -875,6 +875,16 @@ input {
   }
 }
 
+@media (max-width: 1080px) {
+  .brand-highlights {
+    display: none;
+  }
+  .brand-subtitle {
+    font-size: 0.85rem;
+    max-width: 36ch;
+  }
+}
+
 @media (max-width: 940px) {
   .book-stage {
     min-height: auto;
@@ -2237,7 +2247,6 @@ input {
 }
 
 .category-pill {
-  border: 1px solid rgba(134, 209, 154, 0.86);
   border-radius: 999px;
   background: rgba(247, 253, 249, 0.95);
   color: var(--forest-800);
@@ -2337,7 +2346,6 @@ input {
   display: inline-flex;
   align-items: center;
   border-radius: 999px;
-  border: 1px solid rgba(137, 211, 158, 0.86);
   background: rgba(236, 251, 241, 0.98);
   padding: 0.25rem 0.54rem;
   font-size: 0.72rem;
@@ -3016,7 +3024,6 @@ input {
 }
 
 .discover-category-card {
-  border: 1px solid rgba(136, 208, 155, 0.82);
   border-radius: 12px;
   background: rgba(248, 253, 249, 0.96);
   text-align: left;
@@ -3034,7 +3041,6 @@ input {
 
 .discover-category-card.active {
   background: linear-gradient(145deg, rgba(21, 121, 93, 0.12), rgba(15, 95, 73, 0.12));
-  border-color: rgba(59, 168, 110, 0.86);
 }
 
 .discover-category-card strong {
@@ -3298,7 +3304,10 @@ input {
 }
 
 .discover-exact .discover-sidebar {
-  position: static;
+  position: sticky;
+  top: 1rem;
+  max-height: calc(100vh - 2rem);
+  overflow-y: auto;
   border: 1px solid rgba(173, 210, 184, 0.56);
   background: rgba(255, 255, 255, 0.88);
   border-radius: 20px;
@@ -4351,7 +4360,7 @@ input {
 
 .discover-exact .reservation-meta-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 0.22rem 0.7rem;
 }
 
@@ -4780,4 +4789,34 @@ input {
   }
 }
 
+/* ─── Form element focus: replace browser-blue with emerald palette ─── */
+select,
+input[type="search"],
+input[type="text"],
+input[type="email"],
+input[type="password"],
+textarea {
+  accent-color: #059669;
+  color-scheme: light;
+}
 
+select:focus,
+select:focus-visible {
+  outline: none;
+  border-color: #059669;
+  box-shadow: 0 0 0 3px rgba(5, 150, 105, 0.18);
+}
+
+/* Ensure select options inherit brand text color (prevents OS blue tint) */
+select option {
+  background-color: #ffffff;
+  color: #1e293b;
+}
+
+/* Override any remaining browser-default blue focus ring on inputs */
+input:focus,
+input:focus-visible,
+textarea:focus,
+textarea:focus-visible {
+  outline: none;
+}

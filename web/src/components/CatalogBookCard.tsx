@@ -17,7 +17,10 @@ type CatalogBookCardProps = {
   headerAccessory?: ReactNode;
 };
 
-function onCardKeyDown(event: KeyboardEvent<HTMLElement>, onActivate: () => void) {
+function onCardKeyDown(
+  event: KeyboardEvent<HTMLElement>,
+  onActivate: () => void,
+) {
   if (event.key === "Enter" || event.key === " ") {
     event.preventDefault();
     onActivate();
@@ -29,9 +32,8 @@ function getBookMonogram(title: string): string {
     .split(" ")
     .filter(Boolean)
     .slice(0, 2)
-    .map((part) => part.charAt(0).toUpperCase())
+    .map((p) => p.charAt(0).toUpperCase())
     .join("");
-
   return letters || "BK";
 }
 
@@ -41,22 +43,18 @@ function getToneClasses(seed: string) {
     "from-slate-800 via-slate-700 to-emerald-700",
     "from-teal-800 via-cyan-700 to-emerald-600",
     "from-green-900 via-emerald-700 to-lime-600",
-    "from-zinc-800 via-emerald-800 to-teal-700"
+    "from-zinc-800 via-emerald-800 to-teal-700",
   ] as const;
-
-  const hash = Array.from(seed).reduce((accumulator, character) => accumulator + character.charCodeAt(0), 0);
+  const hash = Array.from(seed).reduce((a, c) => a + c.charCodeAt(0), 0);
   return tones[hash % tones.length];
 }
 
-function getAvailabilityClasses(tone: CatalogBookCardProps["availabilityTone"]) {
-  if (tone === "available") {
+function getAvailabilityClasses(
+  tone: CatalogBookCardProps["availabilityTone"],
+) {
+  if (tone === "available")
     return "border-emerald-200 bg-emerald-50 text-emerald-700";
-  }
-
-  if (tone === "borrowed") {
-    return "border-amber-200 bg-amber-50 text-amber-700";
-  }
-
+  if (tone === "borrowed") return "border-amber-200 bg-amber-50 text-amber-700";
   return "border-rose-200 bg-rose-50 text-rose-700";
 }
 
@@ -74,7 +72,7 @@ export default function CatalogBookCard({
   onOpenDetails,
   onAction,
   actionVariant = "primary",
-  headerAccessory
+  headerAccessory,
 }: CatalogBookCardProps) {
   const toneClasses = getToneClasses(title);
   const actionClasses =
@@ -88,25 +86,19 @@ export default function CatalogBookCard({
       role="button"
       tabIndex={0}
       onClick={onOpenDetails}
-      onKeyDown={(event) => onCardKeyDown(event, onOpenDetails)}
+      onKeyDown={(e) => onCardKeyDown(e, onOpenDetails)}
     >
-      {hasBorrowedBefore ? (
-        <span className="absolute left-3 top-3 z-10 rounded-full border border-emerald-200 bg-white/95 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-700 shadow-sm">
-          Borrowed
-        </span>
-      ) : null}
-
-      <div className={`relative h-48 overflow-hidden bg-gradient-to-br ${toneClasses}`}>
+      {/* Cover — overlay gradient removed for crisp, sharp jacket display */}
+      <div
+        className={`relative h-48 overflow-hidden bg-gradient-to-br ${toneClasses}`}
+      >
         {coverImageUrl ? (
-          <>
-            <img
-              src={coverImageUrl}
-              alt={`${title} cover`}
-              loading="lazy"
-              className="absolute inset-0 h-full w-full object-cover"
-            />
-            <div className="absolute inset-0 bg-gradient-to-b from-slate-950/5 via-slate-950/15 to-slate-950/40" />
-          </>
+          <img
+            src={coverImageUrl}
+            alt={`${title} cover`}
+            loading="lazy"
+            className="absolute inset-0 h-full w-full object-cover"
+          />
         ) : (
           <div className="absolute inset-0 flex items-center justify-center text-3xl font-semibold tracking-[0.24em] text-white/90">
             {getBookMonogram(title)}
@@ -117,22 +109,31 @@ export default function CatalogBookCard({
       <div className="flex flex-1 flex-col gap-2.5 p-3.5">
         <div className="flex items-start justify-between gap-2.5">
           <div className="min-w-0">
-            <h3 className="line-clamp-2 text-sm font-semibold tracking-tight text-slate-900">{title}</h3>
-            <p className="mt-1 line-clamp-2 text-xs leading-[1.15rem] text-slate-500">{subtitle}</p>
+            <h3 className="line-clamp-2 text-sm font-semibold tracking-tight text-slate-900">
+              {title}
+            </h3>
+            <p className="mt-1 line-clamp-2 text-xs leading-[1.15rem] text-slate-500">
+              {subtitle}
+            </p>
           </div>
-
           {headerAccessory ?? (
             <span
-              className={`shrink-0 rounded-full border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] ${getAvailabilityClasses(
-                availabilityTone
-              )}`}
+              className={`shrink-0 rounded-full border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] ${getAvailabilityClasses(availabilityTone)}`}
             >
               {availabilityLabel}
             </span>
           )}
         </div>
 
-        <p className="line-clamp-2 text-xs leading-[1.15rem] text-slate-600">{authorLine}</p>
+        <p className="line-clamp-2 text-xs leading-[1.15rem] text-slate-600">
+          {authorLine}
+        </p>
+
+        {hasBorrowedBefore ? (
+          <span className="w-fit rounded-full border border-emerald-100 bg-emerald-50 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-700">
+            Borrowed before
+          </span>
+        ) : null}
 
         <ul className="space-y-1 text-[11px] leading-[1.15rem] text-slate-500">
           {metaItems.map((item, index) => (
@@ -150,7 +151,7 @@ export default function CatalogBookCard({
             event.stopPropagation();
             onAction();
           }}
-          onKeyDown={(event) => event.stopPropagation()}
+          onKeyDown={(e) => e.stopPropagation()}
         >
           {actionLabel}
         </button>

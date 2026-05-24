@@ -9,18 +9,78 @@ type FieldKey = "email" | "password" | "confirmPassword";
 type FieldErrors = Partial<Record<FieldKey, string>>;
 
 const floatingBooks = [
-  { id: "eng-1", label: "Engineering", title: "Strength of Materials", className: "chip-1" },
-  { id: "lang-1", label: "Language", title: "Technical Writing", className: "chip-2" },
-  { id: "sci-1", label: "Science", title: "Applied Physics", className: "chip-3" },
-  { id: "tech-1", label: "Technology", title: "Database Systems", className: "chip-4" },
-  { id: "agri-1", label: "Agriculture", title: "Sustainable Farming", className: "chip-5" },
-  { id: "eng-2", label: "Engineering", title: "Fluid Mechanics", className: "chip-6" },
-  { id: "sci-2", label: "Science", title: "Organic Chemistry", className: "chip-7" },
-  { id: "tech-2", label: "Technology", title: "Software Design", className: "chip-8" },
-  { id: "agri-2", label: "Agriculture", title: "Crop Science", className: "chip-9" },
-  { id: "lang-2", label: "Language", title: "Communication Skills", className: "chip-10" },
-  { id: "sci-3", label: "Science", title: "Biostatistics", className: "chip-11" },
-  { id: "tech-3", label: "Technology", title: "Cloud Computing", className: "chip-12" }
+  {
+    id: "eng-1",
+    label: "Engineering",
+    title: "Strength of Materials",
+    className: "chip-1",
+  },
+  {
+    id: "lang-1",
+    label: "Language",
+    title: "Technical Writing",
+    className: "chip-2",
+  },
+  {
+    id: "sci-1",
+    label: "Science",
+    title: "Applied Physics",
+    className: "chip-3",
+  },
+  {
+    id: "tech-1",
+    label: "Technology",
+    title: "Database Systems",
+    className: "chip-4",
+  },
+  {
+    id: "agri-1",
+    label: "Agriculture",
+    title: "Sustainable Farming",
+    className: "chip-5",
+  },
+  {
+    id: "eng-2",
+    label: "Engineering",
+    title: "Fluid Mechanics",
+    className: "chip-6",
+  },
+  {
+    id: "sci-2",
+    label: "Science",
+    title: "Organic Chemistry",
+    className: "chip-7",
+  },
+  {
+    id: "tech-2",
+    label: "Technology",
+    title: "Software Design",
+    className: "chip-8",
+  },
+  {
+    id: "agri-2",
+    label: "Agriculture",
+    title: "Crop Science",
+    className: "chip-9",
+  },
+  {
+    id: "lang-2",
+    label: "Language",
+    title: "Communication Skills",
+    className: "chip-10",
+  },
+  {
+    id: "sci-3",
+    label: "Science",
+    title: "Biostatistics",
+    className: "chip-11",
+  },
+  {
+    id: "tech-3",
+    label: "Technology",
+    title: "Cloud Computing",
+    className: "chip-12",
+  },
 ];
 
 function isValidEmail(value: string): boolean {
@@ -54,11 +114,17 @@ function getLoginErrorMessage(error: unknown): string {
       ? ((error as { code?: string }).code ?? "").toLowerCase()
       : "";
 
-  if (code === "email_not_confirmed" || /email\s+(address\s+)?not\s+confirmed/i.test(message)) {
+  if (
+    code === "email_not_confirmed" ||
+    /email\s+(address\s+)?not\s+confirmed/i.test(message)
+  ) {
     return "Email not confirmed. Please verify your email before logging in.";
   }
 
-  if (code === "invalid_credentials" || /invalid login credentials/i.test(message)) {
+  if (
+    code === "invalid_credentials" ||
+    /invalid login credentials/i.test(message)
+  ) {
     return "Invalid email or password. Please try again or use Forgot password.";
   }
 
@@ -116,7 +182,11 @@ export default function AuthPage() {
     );
 
   const validateFields = (
-    values: { email: string; password: string; confirmPassword: string } = { email, password, confirmPassword }
+    values: { email: string; password: string; confirmPassword: string } = {
+      email,
+      password,
+      confirmPassword,
+    },
   ): FieldErrors => {
     const nextErrors: FieldErrors = {};
     const normalizedEmail = values.email.trim();
@@ -156,14 +226,16 @@ export default function AuthPage() {
 
   useEffect(() => {
     if (!hasSupabaseEnv) {
-      setNotice("Supabase config is missing. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.");
+      setNotice(
+        "Supabase config is missing. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.",
+      );
       setNoticeType("error");
       return;
     }
 
     const checkExistingSession = async () => {
       const {
-        data: { session }
+        data: { session },
       } = await supabase.auth.getSession();
 
       if (session) {
@@ -184,10 +256,9 @@ export default function AuthPage() {
     if (bookState !== "opening") {
       return;
     }
-
     const openTimer = window.setTimeout(() => {
       setBookState("open");
-    }, 860);
+    }, 960);
 
     return () => {
       window.clearTimeout(openTimer);
@@ -210,7 +281,10 @@ export default function AuthPage() {
     event.preventDefault();
 
     if (!hasSupabaseEnv) {
-      setFeedback("Supabase environment variables are not configured.", "error");
+      setFeedback(
+        "Supabase environment variables are not configured.",
+        "error",
+      );
       return;
     }
 
@@ -228,7 +302,10 @@ export default function AuthPage() {
 
     try {
       if (mode === "login") {
-        const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+        const { error } = await supabase.auth.signInWithPassword({
+          email: email.trim(),
+          password,
+        });
         if (error) throw error;
 
         setFeedback("Logged in successfully. Redirecting...", "success");
@@ -240,17 +317,21 @@ export default function AuthPage() {
         email: email.trim(),
         password,
         options: {
-          emailRedirectTo: dashboardRedirect
-        }
+          emailRedirectTo: dashboardRedirect,
+        },
       });
 
       if (error) throw error;
 
       const isExistingAccountAttempt =
-        Array.isArray(data.user?.identities) && data.user?.identities.length === 0;
+        Array.isArray(data.user?.identities) &&
+        data.user?.identities.length === 0;
 
       if (isExistingAccountAttempt) {
-        setFeedback("This email is already registered. Use Forgot password to recover access.", "error");
+        setFeedback(
+          "This email is already registered. Use Forgot password to recover access.",
+          "error",
+        );
         return;
       }
 
@@ -258,7 +339,10 @@ export default function AuthPage() {
         setFeedback("Account created. Redirecting...", "success");
         navigate("/dashboard", { replace: true });
       } else {
-        setFeedback("Account created. Check your email to confirm your account.", "success");
+        setFeedback(
+          "Account created. Check your email to confirm your account.",
+          "success",
+        );
       }
     } catch (error) {
       if (mode === "login") {
@@ -273,7 +357,10 @@ export default function AuthPage() {
 
   const handleMagicLink = async () => {
     if (!hasSupabaseEnv) {
-      setFeedback("Supabase environment variables are not configured.", "error");
+      setFeedback(
+        "Supabase environment variables are not configured.",
+        "error",
+      );
       return;
     }
 
@@ -296,8 +383,8 @@ export default function AuthPage() {
       const { error } = await supabase.auth.signInWithOtp({
         email: trimmedEmail,
         options: {
-          emailRedirectTo: dashboardRedirect
-        }
+          emailRedirectTo: dashboardRedirect,
+        },
       });
 
       if (error) throw error;
@@ -315,7 +402,10 @@ export default function AuthPage() {
 
   const handleForgotPassword = async () => {
     if (!hasSupabaseEnv) {
-      setFeedback("Supabase environment variables are not configured.", "error");
+      setFeedback(
+        "Supabase environment variables are not configured.",
+        "error",
+      );
       return;
     }
 
@@ -335,9 +425,12 @@ export default function AuthPage() {
     setIsLoading(true);
 
     try {
-      const { error } = await supabase.auth.resetPasswordForEmail(trimmedEmail, {
-        redirectTo: resetPasswordRedirect
-      });
+      const { error } = await supabase.auth.resetPasswordForEmail(
+        trimmedEmail,
+        {
+          redirectTo: resetPasswordRedirect,
+        },
+      );
 
       if (error) throw error;
       setFeedback("Password reset link sent to your email.", "success");
@@ -354,7 +447,10 @@ export default function AuthPage() {
 
   const handleResendConfirmation = async () => {
     if (!hasSupabaseEnv) {
-      setFeedback("Supabase environment variables are not configured.", "error");
+      setFeedback(
+        "Supabase environment variables are not configured.",
+        "error",
+      );
       return;
     }
 
@@ -378,12 +474,15 @@ export default function AuthPage() {
         type: "signup",
         email: trimmedEmail,
         options: {
-          emailRedirectTo: dashboardRedirect
-        }
+          emailRedirectTo: dashboardRedirect,
+        },
       });
 
       if (error) throw error;
-      setFeedback("Confirmation email resent. Check inbox and spam folder.", "success");
+      setFeedback(
+        "Confirmation email resent. Check inbox and spam folder.",
+        "success",
+      );
     } catch (error) {
       if (mode === "login") {
         setFeedback(getLoginErrorMessage(error), "error");
@@ -434,247 +533,304 @@ export default function AuthPage() {
             <div className="cover-copy">
               <p className="cover-welcome">Welcome to BookItStudent</p>
               <p className="cover-description">
-                A student-ready library portal for engineering, language, science, technology, and
-                agriculture collections.
+                A student-ready library portal for engineering, language,
+                science, technology, and agriculture collections.
               </p>
             </div>
 
             <footer className="cover-footer">
-              <p className="cover-reminder">Click or press this cover to open Login/Sign Up.</p>
-              <span className="cover-edition">BookItStudent 2026 | Enera Ltd.</span>
+              <p className="cover-reminder">
+                Click or press this cover to open Login/Sign Up.
+              </p>
+              <span className="cover-edition">
+                BookItStudent 2026 | Enera Ltd.
+              </span>
             </footer>
           </div>
         </button>
 
         <section className="auth-shell">
-        <aside className="brand-pane">
-          <header className="brand-header">
-            <img
-              src="/assets/bookitstudent-logo.jpg"
-              alt="BookItStudent - Visayas State University"
-              className="brand-logo"
-            />
-            <span className="brand-divider" aria-hidden="true" />
-            <div className="brand-heading">
-              <h1 className="brand-title">BookItStudent</h1>
-              <p className="brand-university">Visayas State University</p>
-            </div>
-          </header>
-
-          <p className="brand-subtitle">
-            Reserve books faster, track requests in real time, and keep your learning workflow on
-            one secure platform.
-          </p>
-
-          <div className="brand-badges">
-            <span>Secure Auth</span>
-            <span>Supabase Powered</span>
-            <span>Mobile First</span>
-          </div>
-
-          <div className="brand-highlights" aria-label="Collection highlights">
-            <article className="highlight-card">
-              <h3>Collection Focus</h3>
-              <p>Engineering, science, technology, language, and agriculture resources.</p>
-            </article>
-            <article className="highlight-card">
-              <h3>Ready for Students</h3>
-              <p>Reserve and track books from one secure, mobile-friendly portal.</p>
-            </article>
-          </div>
-        </aside>
-
-        <section className="form-pane" aria-label="Authentication form">
-          <div className="form-shell">
-            <div className="mode-toggle" role="tablist" aria-label="Authentication mode">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={mode === "login"}
-                className={`mode-button ${mode === "login" ? "active" : ""}`}
-                onClick={() => {
-                  setMode("login");
-                  setSubmittedOnce(false);
-                }}
-              >
-                Login
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={mode === "signup"}
-                className={`mode-button ${mode === "signup" ? "active" : ""}`}
-                onClick={() => {
-                  setMode("signup");
-                  setSubmittedOnce(false);
-                }}
-              >
-                Sign Up
-              </button>
-            </div>
-
-            <form className="auth-form" onSubmit={handleSubmit} noValidate>
-              <label htmlFor="email">Email</label>
-              <input
-                id="email"
-                type="email"
-                autoComplete="email"
-                value={email}
-                aria-invalid={Boolean(errors.email)}
-                className={errors.email ? "field-error" : ""}
-                onBlur={() => setFieldError("email", validateFields().email)}
-                onChange={(event) => {
-                  const nextEmail = event.target.value;
-                  setEmail(nextEmail);
-                  if (submittedOnce || errors.email) {
-                    setFieldError(
-                      "email",
-                      validateFields({ email: nextEmail, password, confirmPassword }).email
-                    );
-                  }
-                }}
-                placeholder="student@vsu.edu.ph"
+          <aside className="brand-pane">
+            <header className="brand-header">
+              <img
+                src="/assets/bookitstudent-logo.jpg"
+                alt="BookItStudent - Visayas State University"
+                className="brand-logo"
               />
-              <p className={`field-feedback ${errors.email ? "show" : ""}`}>
-                {errors.email ?? "\u00a0"}
-              </p>
-
-              <label htmlFor="password">Password</label>
-              <div className="password-row">
-                <div className="password-field">
-                  <input
-                    id="password"
-                    type={showPassword ? "text" : "password"}
-                    autoComplete={mode === "login" ? "current-password" : "new-password"}
-                    value={password}
-                    aria-invalid={Boolean(errors.password)}
-                    className={errors.password ? "field-error" : ""}
-                    onBlur={() => setFieldError("password", validateFields().password)}
-                    onChange={(event) => {
-                      const nextPassword = event.target.value;
-                      setPassword(nextPassword);
-                      if (submittedOnce || errors.password || errors.confirmPassword) {
-                        const nextErrors = validateFields({
-                          email,
-                          password: nextPassword,
-                          confirmPassword
-                        });
-                        setFieldError("password", nextErrors.password);
-                        if (mode === "signup") {
-                          setFieldError("confirmPassword", nextErrors.confirmPassword);
-                        }
-                      }
-                    }}
-                    placeholder="Enter your password"
-                  />
-                  <button
-                    type="button"
-                    className="password-visibility"
-                    aria-label={showPassword ? "Hide password" : "Show password"}
-                    onClick={() => setShowPassword((value) => !value)}
-                  >
-                    {renderVisibilityIcon(showPassword)}
-                  </button>
-                </div>
+              <span className="brand-divider" aria-hidden="true" />
+              <div className="brand-heading">
+                <h1 className="brand-title">BookItStudent</h1>
+                <p className="brand-university">Visayas State University</p>
               </div>
-              <p className={`field-feedback ${errors.password ? "show" : ""}`}>
-                {errors.password ?? "\u00a0"}
-              </p>
+            </header>
 
-              {mode === "signup" && (
-                <>
-                  <label htmlFor="confirm-password">Confirm password</label>
-                  <div className="password-row">
-                    <div className="password-field">
-                      <input
-                        id="confirm-password"
-                        type={showPassword ? "text" : "password"}
-                        autoComplete="new-password"
-                        value={confirmPassword}
-                        aria-invalid={Boolean(errors.confirmPassword)}
-                        className={errors.confirmPassword ? "field-error" : ""}
-                        onBlur={() => setFieldError("confirmPassword", validateFields().confirmPassword)}
-                        onChange={(event) => {
-                          const nextConfirm = event.target.value;
-                          setConfirmPassword(nextConfirm);
-                          if (submittedOnce || errors.confirmPassword) {
-                            setFieldError(
-                              "confirmPassword",
-                              validateFields({ email, password, confirmPassword: nextConfirm })
-                                .confirmPassword
-                            );
-                          }
-                        }}
-                        placeholder="Confirm your password"
-                      />
-                      <button
-                        type="button"
-                        className="password-visibility"
-                        aria-label={showPassword ? "Hide password" : "Show password"}
-                        onClick={() => setShowPassword((value) => !value)}
-                      >
-                        {renderVisibilityIcon(showPassword)}
-                      </button>
-                    </div>
-                  </div>
-                  <p className={`field-feedback ${errors.confirmPassword ? "show" : ""}`}>
-                    {errors.confirmPassword ?? "\u00a0"}
-                  </p>
+            <p className="brand-subtitle">
+              Reserve books faster, track requests in real time, and keep your
+              learning workflow on one secure platform.
+            </p>
 
-                  <div className="password-meter" aria-live="polite">
-                    <span>Password strength</span>
-                    <div className="meter-track" aria-hidden="true">
-                      <span className={`meter-fill score-${passwordScore}`} />
-                    </div>
-                  </div>
-                </>
-              )}
+            <div className="brand-badges">
+              <span>Secure Auth</span>
+              <span>Supabase Powered</span>
+              <span>Mobile First</span>
+            </div>
 
-              <div className="action-group">
-                <button type="submit" className="btn btn-primary" disabled={isLoading}>
-                  {isLoading ? "Please wait..." : mode === "login" ? "Login" : "Create account"}
-                </button>
+            <div
+              className="brand-highlights"
+              aria-label="Collection highlights"
+            >
+              <article className="highlight-card">
+                <h3>Collection Focus</h3>
+                <p>
+                  Engineering, science, technology, language, and agriculture
+                  resources.
+                </p>
+              </article>
+              <article className="highlight-card">
+                <h3>Ready for Students</h3>
+                <p>
+                  Reserve and track books from one secure, mobile-friendly
+                  portal.
+                </p>
+              </article>
+            </div>
+          </aside>
 
+          <section className="form-pane" aria-label="Authentication form">
+            <div className="form-shell">
+              <div
+                className="mode-toggle"
+                role="tablist"
+                aria-label="Authentication mode"
+              >
                 <button
                   type="button"
-                  className="btn btn-soft"
-                  onClick={handleMagicLink}
-                  disabled={isLoading}
+                  role="tab"
+                  aria-selected={mode === "login"}
+                  className={`mode-button ${mode === "login" ? "active" : ""}`}
+                  onClick={() => {
+                    setMode("login");
+                    setSubmittedOnce(false);
+                  }}
                 >
-                  Send Magic Link
+                  Login
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={mode === "signup"}
+                  className={`mode-button ${mode === "signup" ? "active" : ""}`}
+                  onClick={() => {
+                    setMode("signup");
+                    setSubmittedOnce(false);
+                  }}
+                >
+                  Sign Up
                 </button>
               </div>
 
-              <div className="auth-links">
-                {mode === "login" && (
-                  <button
-                    type="button"
-                    className="btn btn-link"
-                    onClick={handleForgotPassword}
-                    disabled={isLoading}
-                  >
-                    Forgot password?
-                  </button>
-                )}
-                {mode === "signup" && (
-                  <button
-                    type="button"
-                    className="btn btn-link link-muted"
-                    onClick={handleResendConfirmation}
-                    disabled={isLoading}
-                  >
-                    Resend confirmation email
-                  </button>
-                )}
-              </div>
+              <form className="auth-form" onSubmit={handleSubmit} noValidate>
+                <label htmlFor="email">Email</label>
+                <input
+                  id="email"
+                  type="email"
+                  autoComplete="email"
+                  value={email}
+                  aria-invalid={Boolean(errors.email)}
+                  className={errors.email ? "field-error" : ""}
+                  onBlur={() => setFieldError("email", validateFields().email)}
+                  onChange={(event) => {
+                    const nextEmail = event.target.value;
+                    setEmail(nextEmail);
+                    if (submittedOnce || errors.email) {
+                      setFieldError(
+                        "email",
+                        validateFields({
+                          email: nextEmail,
+                          password,
+                          confirmPassword,
+                        }).email,
+                      );
+                    }
+                  }}
+                  placeholder="student@vsu.edu.ph"
+                />
+                <p className={`field-feedback ${errors.email ? "show" : ""}`}>
+                  {errors.email ?? "\u00a0"}
+                </p>
 
-              <p className={`status ${noticeType}`}>{notice}</p>
-            </form>
-          </div>
+                <label htmlFor="password">Password</label>
+                <div className="password-row">
+                  <div className="password-field">
+                    <input
+                      id="password"
+                      type={showPassword ? "text" : "password"}
+                      autoComplete={
+                        mode === "login" ? "current-password" : "new-password"
+                      }
+                      value={password}
+                      aria-invalid={Boolean(errors.password)}
+                      className={errors.password ? "field-error" : ""}
+                      onBlur={() =>
+                        setFieldError("password", validateFields().password)
+                      }
+                      onChange={(event) => {
+                        const nextPassword = event.target.value;
+                        setPassword(nextPassword);
+                        if (
+                          submittedOnce ||
+                          errors.password ||
+                          errors.confirmPassword
+                        ) {
+                          const nextErrors = validateFields({
+                            email,
+                            password: nextPassword,
+                            confirmPassword,
+                          });
+                          setFieldError("password", nextErrors.password);
+                          if (mode === "signup") {
+                            setFieldError(
+                              "confirmPassword",
+                              nextErrors.confirmPassword,
+                            );
+                          }
+                        }
+                      }}
+                      placeholder="Enter your password"
+                    />
+                    <button
+                      type="button"
+                      className="password-visibility"
+                      aria-label={
+                        showPassword ? "Hide password" : "Show password"
+                      }
+                      onClick={() => setShowPassword((value) => !value)}
+                    >
+                      {renderVisibilityIcon(showPassword)}
+                    </button>
+                  </div>
+                </div>
+                <p
+                  className={`field-feedback ${errors.password ? "show" : ""}`}
+                >
+                  {errors.password ?? "\u00a0"}
+                </p>
+
+                {mode === "signup" && (
+                  <>
+                    <label htmlFor="confirm-password">Confirm password</label>
+                    <div className="password-row">
+                      <div className="password-field">
+                        <input
+                          id="confirm-password"
+                          type={showPassword ? "text" : "password"}
+                          autoComplete="new-password"
+                          value={confirmPassword}
+                          aria-invalid={Boolean(errors.confirmPassword)}
+                          className={
+                            errors.confirmPassword ? "field-error" : ""
+                          }
+                          onBlur={() =>
+                            setFieldError(
+                              "confirmPassword",
+                              validateFields().confirmPassword,
+                            )
+                          }
+                          onChange={(event) => {
+                            const nextConfirm = event.target.value;
+                            setConfirmPassword(nextConfirm);
+                            if (submittedOnce || errors.confirmPassword) {
+                              setFieldError(
+                                "confirmPassword",
+                                validateFields({
+                                  email,
+                                  password,
+                                  confirmPassword: nextConfirm,
+                                }).confirmPassword,
+                              );
+                            }
+                          }}
+                          placeholder="Confirm your password"
+                        />
+                        <button
+                          type="button"
+                          className="password-visibility"
+                          aria-label={
+                            showPassword ? "Hide password" : "Show password"
+                          }
+                          onClick={() => setShowPassword((value) => !value)}
+                        >
+                          {renderVisibilityIcon(showPassword)}
+                        </button>
+                      </div>
+                    </div>
+                    <p
+                      className={`field-feedback ${errors.confirmPassword ? "show" : ""}`}
+                    >
+                      {errors.confirmPassword ?? "\u00a0"}
+                    </p>
+
+                    <div className="password-meter" aria-live="polite">
+                      <span>Password strength</span>
+                      <div className="meter-track" aria-hidden="true">
+                        <span className={`meter-fill score-${passwordScore}`} />
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                <div className="action-group">
+                  <button
+                    type="submit"
+                    className="btn btn-primary"
+                    disabled={isLoading}
+                  >
+                    {isLoading
+                      ? "Please wait..."
+                      : mode === "login"
+                        ? "Login"
+                        : "Create account"}
+                  </button>
+
+                  <button
+                    type="button"
+                    className="btn btn-soft"
+                    onClick={handleMagicLink}
+                    disabled={isLoading}
+                  >
+                    Send Magic Link
+                  </button>
+                </div>
+
+                <div className="auth-links">
+                  {mode === "login" && (
+                    <button
+                      type="button"
+                      className="btn btn-link"
+                      onClick={handleForgotPassword}
+                      disabled={isLoading}
+                    >
+                      Forgot password?
+                    </button>
+                  )}
+                  {mode === "signup" && (
+                    <button
+                      type="button"
+                      className="btn btn-link link-muted"
+                      onClick={handleResendConfirmation}
+                      disabled={isLoading}
+                    >
+                      Resend confirmation email
+                    </button>
+                  )}
+                </div>
+
+                <p className={`status ${noticeType}`}>{notice}</p>
+              </form>
+            </div>
+          </section>
         </section>
-      </section>
       </section>
     </main>
   );
 }
-
