@@ -4820,3 +4820,92 @@ textarea:focus,
 textarea:focus-visible {
   outline: none;
 }
+@keyframes adminChartDraw {
+  from {
+    stroke-dashoffset: 700;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes adminBarGrow {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+.admin-action-button {
+  cursor: pointer;
+  transition:
+    transform 180ms ease,
+    box-shadow 180ms ease,
+    background-color 180ms ease;
+}
+
+.admin-action-button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 22px rgba(4, 120, 87, 0.22);
+}
+
+.admin-action-button:active {
+  transform: translateY(0);
+}
+
+.admin-chart-line {
+  stroke-dasharray: 700;
+  animation: adminChartDraw 900ms ease-out both;
+}
+
+.admin-chart-dot {
+  transform-origin: center;
+  transition: r 160ms ease;
+}
+
+.admin-chart-dot:hover {
+  r: 5;
+}
+
+.admin-bar {
+  transform-origin: left center;
+  animation: adminBarGrow 700ms ease-out both;
+}
+
+.status-pending {
+  border-color: #e2e8f0;
+  background: #f8fafc;
+  color: #475569;
+}
+
+.status-approved {
+  border-color: #99f6e4;
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.status-cancelled {
+  border-color: #fde68a;
+  background: #fffbeb;
+  color: #b45309;
+}
+
+.status-picked_up {
+  border-color: #99f6e4;
+  background: #f0fdfa;
+  color: #0f766e;
+}
+
+.status-returned {
+  border-color: #c7d2fe;
+  background: #eef2ff;
+  color: #4338ca;
+}
+
+.status-overdue {
+  border-color: #fecdd3;
+  background: #fff1f2;
+  color: #be123c;
+}

@@ -9,7 +9,15 @@ export type WorkspaceRoute =
   | "category"
   | "favorites"
   | "settings"
-  | "help";
+  | "help"
+  | "admin"
+  | "admin-inventory"
+  | "admin-circulation"
+  | "admin-overdue"
+  | "admin-users"
+  | "admin-reports"
+  | "admin-settings"
+  | "admin-help";
 
 export type WorkspaceMenuKey =
   | "discover"
@@ -18,18 +26,20 @@ export type WorkspaceMenuKey =
   | "reservation"
   | "favorite"
   | "setting"
-  | "help";
+  | "help"
+  | "admin-dashboard"
+  | "admin-inventory"
+  | "admin-circulation"
+  | "admin-overdue"
+  | "admin-users"
+  | "admin-reports"
+  | "admin-settings"
+  | "admin-help";
 
-type SidebarStat = {
-  label: string;
-  value: string;
-};
+export type WorkspaceAudience = "student" | "admin";
 
-type SidebarAction = {
-  label: string;
-  onClick: () => void;
-  disabled?: boolean;
-};
+type SidebarStat = { label: string; value: string };
+type SidebarAction = { label: string; onClick: () => void; disabled?: boolean };
 
 type NotifierModel = {
   notifications: ReservationNotification[];
@@ -44,6 +54,7 @@ type NotifierModel = {
 type LibraryWorkspaceLayoutProps = {
   activeRoute: WorkspaceRoute;
   activeMenuKey?: WorkspaceMenuKey;
+  audience?: WorkspaceAudience;
   title: string;
   description: string;
   releaseCode?: string;
@@ -59,23 +70,33 @@ type LibraryWorkspaceLayoutProps = {
   children: ReactNode;
 };
 
-type MenuItem = {
-  key: WorkspaceMenuKey;
-  label: string;
-  route: WorkspaceRoute;
-};
+type MenuItem = { key: WorkspaceMenuKey; label: string; route: WorkspaceRoute };
 
-const PRIMARY_MENU: MenuItem[] = [
+const STUDENT_PRIMARY_MENU: MenuItem[] = [
   { key: "discover", label: "Discover", route: "search" },
   { key: "category", label: "Category", route: "category" },
   { key: "library", label: "My Library", route: "dashboard" },
   { key: "reservation", label: "Reservation", route: "reservations" },
-  { key: "favorite", label: "Favorite", route: "favorites" }
+  { key: "favorite", label: "Favorite", route: "favorites" },
 ];
 
-const SECONDARY_MENU: MenuItem[] = [
+const STUDENT_SECONDARY_MENU: MenuItem[] = [
   { key: "setting", label: "Setting", route: "settings" },
-  { key: "help", label: "Help", route: "help" }
+  { key: "help", label: "Help", route: "help" },
+];
+
+const ADMIN_PRIMARY_MENU: MenuItem[] = [
+  { key: "admin-dashboard", label: "Admin Dashboard", route: "admin" },
+  { key: "admin-inventory", label: "Inventory / Catalog Manager", route: "admin-inventory" },
+  { key: "admin-circulation", label: "Circulation / Load", route: "admin-circulation" },
+  { key: "admin-overdue", label: "Overdue & Fines", route: "admin-overdue" },
+  { key: "admin-users", label: "Users & Penalties", route: "admin-users" },
+  { key: "admin-reports", label: "Reports / Analytics", route: "admin-reports" },
+];
+
+const ADMIN_SECONDARY_MENU: MenuItem[] = [
+  { key: "admin-settings", label: "Settings", route: "admin-settings" },
+  { key: "admin-help", label: "Help", route: "admin-help" },
 ];
 
 const ROUTE_MENU_KEY_MAP: Record<WorkspaceRoute, WorkspaceMenuKey> = {
@@ -85,7 +106,15 @@ const ROUTE_MENU_KEY_MAP: Record<WorkspaceRoute, WorkspaceMenuKey> = {
   category: "category",
   favorites: "favorite",
   settings: "setting",
-  help: "help"
+  help: "help",
+  admin: "admin-dashboard",
+  "admin-inventory": "admin-inventory",
+  "admin-circulation": "admin-circulation",
+  "admin-overdue": "admin-overdue",
+  "admin-users": "admin-users",
+  "admin-reports": "admin-reports",
+  "admin-settings": "admin-settings",
+  "admin-help": "admin-help",
 };
 
 function getUserLabel(email: string): string {
@@ -101,6 +130,7 @@ function getInitial(email: string): string {
 export default function LibraryWorkspaceLayout({
   activeRoute,
   activeMenuKey,
+  audience = "student",
   title,
   description,
   releaseCode,
@@ -113,9 +143,11 @@ export default function LibraryWorkspaceLayout({
   notice,
   onNavigate,
   onSignOut,
-  children
+  children,
 }: LibraryWorkspaceLayoutProps) {
   const currentMenu = activeMenuKey ?? ROUTE_MENU_KEY_MAP[activeRoute];
+  const primaryMenu = audience === "admin" ? ADMIN_PRIMARY_MENU : STUDENT_PRIMARY_MENU;
+  const secondaryMenu = audience === "admin" ? ADMIN_SECONDARY_MENU : STUDENT_SECONDARY_MENU;
 
   return (
     <main className="portal-page discover-page discover-exact">
@@ -123,7 +155,10 @@ export default function LibraryWorkspaceLayout({
         <div className="discover-shell">
           <aside className="discover-sidebar" aria-label="Primary navigation">
             <div className="discover-sidebar-brand">
-              <img src="/assets/bookitstudent-logo.jpg" alt="BookItStudent logo" />
+              <img
+                src="/assets/bookitstudent-logo.jpg"
+                alt="BookItStudent logo"
+              />
               <div>
                 <h2>BookItStudent</h2>
                 <p>Visayas State University</p>
@@ -132,11 +167,9 @@ export default function LibraryWorkspaceLayout({
 
             <div className="discover-menu-block">
               <p className="discover-menu-title">Menu</p>
-
               <nav className="discover-menu">
-                {PRIMARY_MENU.map((item) => {
+                {primaryMenu.map((item) => {
                   const active = item.key === currentMenu;
-
                   return (
                     <button
                       key={item.key}
@@ -155,10 +188,12 @@ export default function LibraryWorkspaceLayout({
 
             <div className="discover-sidebar-divider" />
 
-            <nav className="discover-menu discover-menu-secondary" aria-label="Secondary navigation">
-              {SECONDARY_MENU.map((item) => {
+            <nav
+              className="discover-menu discover-menu-secondary"
+              aria-label="Secondary navigation"
+            >
+              {secondaryMenu.map((item) => {
                 const active = item.key === currentMenu;
-
                 return (
                   <button
                     key={item.key}
@@ -214,10 +249,12 @@ export default function LibraryWorkspaceLayout({
                 <h1>{title}</h1>
                 <p>{description}</p>
               </div>
-
               <div className="discover-header-actions">
                 {headerActions}
-                <div className="discover-profile" aria-label="Profile and notifications">
+                <div
+                  className="discover-profile"
+                  aria-label="Profile and notifications"
+                >
                   <div className="discover-profile-alert">
                     <ReservationNotifier
                       notifications={notifier.notifications}
@@ -233,13 +270,17 @@ export default function LibraryWorkspaceLayout({
                     <span className="discover-user-avatar" aria-hidden="true">
                       {getInitial(userEmail)}
                     </span>
-                    <span className="discover-user-name">{getUserLabel(userEmail)}</span>
+                    <span className="discover-user-name">
+                      {getUserLabel(userEmail)}
+                    </span>
                   </p>
                 </div>
               </div>
             </header>
 
-            {statusBar ? <section className="discover-meta-row">{statusBar}</section> : null}
+            {statusBar ? (
+              <section className="discover-meta-row">{statusBar}</section>
+            ) : null}
             {notice}
             <div className="discover-content-stack">{children}</div>
           </section>

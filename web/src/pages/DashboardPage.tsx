@@ -14,7 +14,7 @@ type ReservationBook = {
   cover_image_url: string | null;
 };
 
-type LibraryReservationStatus = "pending" | "ready_for_pickup" | "fulfilled" | "cancelled" | "expired";
+type LibraryReservationStatus = "pending" | "approved" | "ready_for_pickup" | "fulfilled" | "cancelled" | "expired" | "returned" | "overdue";
 
 type ReservationRecord = {
   id: string;
@@ -89,9 +89,12 @@ function getToneClasses(seed: string) {
 }
 
 function mapReservationStatusToBookStatus(status: LibraryReservationStatus): BookStatus {
-  if (status === "pending" || status === "ready_for_pickup") return "pending";
+  if (status === "pending") return "pending";
+  if (status === "approved" || status === "ready_for_pickup") return "approved";
   if (status === "cancelled") return "cancelled";
   if (status === "expired") return "overdue";
+  if (status === "overdue") return "overdue";
+  if (status === "returned") return "returned";
   return "returned";
 }
 
@@ -106,7 +109,7 @@ function normalizeReservationRecord(record: ReservationRecord): LibraryBookItem 
     coverImageUrl: linkedBook.cover_image_url,
     borrowDate: record.requested_at,
     returnDate:
-      status === "pending"
+      status === "pending" || status === "approved"
         ? record.expires_at
         : status === "cancelled"
         ? record.cancelled_at
@@ -124,6 +127,13 @@ function StatusIcon({ status }: { status: BookStatus }) {
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={shared}>
         <circle cx="12" cy="12" r="8" />
         <path d="M12 8v4l2.5 2.5" />
+      </svg>
+    );
+  }
+  if (status === "approved") {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={shared}>
+        <path d="M20 6 9 17l-5-5" />
       </svg>
     );
   }
@@ -154,15 +164,19 @@ function StatusIcon({ status }: { status: BookStatus }) {
 }
 
 function getStatusColors(status: BookStatus) {
-  if (status === "pending") return "border-emerald-200 bg-emerald-700 text-white shadow-lg shadow-emerald-700/20";
-  if (status === "cancelled") return "border-rose-200 bg-rose-50 text-rose-700";
-  if (status === "returned") return "border-sky-200 bg-sky-50 text-sky-700";
+  if (status === "pending") return "border-slate-200 bg-slate-50 text-slate-600";
+  if (status === "approved") return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  if (status === "cancelled") return "border-amber-200 bg-amber-50 text-amber-700";
+  if (status === "returned") return "border-indigo-200 bg-indigo-50 text-indigo-700";
+  if (status === "picked_up") return "border-teal-200 bg-teal-50 text-teal-700";
   return "border-amber-200 bg-amber-50 text-amber-700";
 }
 
 function getStatusLabel(status: BookStatus) {
   if (status === "pending") return "Pending";
+  if (status === "approved") return "Approved";
   if (status === "cancelled") return "Cancelled";
+  if (status === "picked_up") return "Picked up";
   if (status === "returned") return "Returned";
   return "Overdue";
 }
@@ -185,13 +199,15 @@ function StatusFilterButton({
       aria-label={label}
       title={label}
       onClick={onClick}
-      className="flex w-[88px] flex-col items-center gap-1.5 text-center"
+      className={`flex min-h-[104px] w-[96px] flex-col items-center justify-center gap-1.5 rounded-2xl border px-2 py-3 text-center shadow-sm transition hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-emerald-500/25 ${
+        active ? "border-emerald-200 bg-emerald-50" : "border-slate-200 bg-white"
+      }`}
     >
       <span
         className={`flex h-14 w-14 items-center justify-center rounded-2xl transition ${
           active
             ? "bg-emerald-700 text-white shadow-lg shadow-emerald-700/25"
-            : "bg-white text-slate-600 hover:text-emerald-700"
+            : "bg-slate-50 text-slate-600"
         }`}
       >
         <StatusIcon status={status} />
@@ -278,7 +294,9 @@ export default function DashboardPage() {
   const [activeStatus, setActiveStatus] = useState<BookStatus>("pending");
   const [expandedSections, setExpandedSections] = useState<Record<BookStatus, boolean>>({
     pending: false,
+    approved: false,
     cancelled: false,
+    picked_up: false,
     returned: false,
     overdue: false
   });
@@ -334,7 +352,7 @@ export default function DashboardPage() {
         .from("reservations")
         .select("id,status,requested_at,expires_at,fulfilled_at,cancelled_at,books(id,title,subtitle,cover_image_url)")
         .eq("user_id", session.user.id)
-        .in("status", ["pending", "ready_for_pickup", "fulfilled", "cancelled", "expired"])
+        .in("status", ["pending", "approved", "ready_for_pickup", "fulfilled", "cancelled", "expired"])
         .order("requested_at", { ascending: false });
 
       if (reservationsResult.error) {
@@ -388,7 +406,9 @@ export default function DashboardPage() {
   const groupedItems = useMemo(() => {
     return {
       pending: libraryItems.filter((item) => item.status === "pending"),
+      approved: libraryItems.filter((item) => item.status === "approved"),
       cancelled: libraryItems.filter((item) => item.status === "cancelled"),
+      picked_up: libraryItems.filter((item) => item.status === "picked_up"),
       returned: libraryItems.filter((item) => item.status === "returned"),
       overdue: libraryItems.filter((item) => item.status === "overdue")
     } satisfies Record<BookStatus, LibraryBookItem[]>;
@@ -504,7 +524,7 @@ export default function DashboardPage() {
 
         <section className="rounded-[1.8rem] border border-slate-200 bg-white/95 p-5 shadow-[0_20px_50px_rgba(15,23,42,0.06)]">
           <div className="flex flex-wrap items-center gap-3">
-            {(["pending", "cancelled", "returned", "overdue"] as BookStatus[]).map((status) => (
+            {(["pending", "approved", "picked_up", "cancelled", "returned", "overdue"] as BookStatus[]).map((status) => (
               <StatusFilterButton
                 key={status}
                 active={activeStatus === status}
