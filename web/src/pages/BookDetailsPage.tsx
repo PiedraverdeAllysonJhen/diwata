@@ -83,7 +83,7 @@ type Notice = {
 
 type LoadSource = "manual" | "live";
 type FeedbackMode = "review" | "comment";
-type ActiveReservationStatus = "pending" | "ready_for_pickup" | null;
+type ActiveReservationStatus = "pending" | "approved" | "ready_for_pickup" | null;
 
 function normalizeCategories(
   relations: RawCategoryRelation[] | null,
@@ -294,7 +294,7 @@ export default function BookDetailsPage() {
           .select("id,status")
           .eq("book_id", bookId)
           .eq("user_id", session.user.id)
-          .in("status", ["pending", "ready_for_pickup"])
+          .in("status", ["pending", "approved", "ready_for_pickup"])
           .order("requested_at", { ascending: false })
           .limit(1)
           .maybeSingle(),

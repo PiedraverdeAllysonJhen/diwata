@@ -28,7 +28,7 @@ type ReservationBook = {
   book_authors: RawAuthorRelation[] | null;
 };
 
-type ReservationStatus = "pending" | "ready_for_pickup" | "fulfilled";
+type ReservationStatus = "pending" | "approved" | "ready_for_pickup" | "fulfilled" | "cancelled" | "expired";
 
 type ReservationRecord = {
   id: string;
@@ -46,8 +46,8 @@ type Notice = {
 
 type LoadSource = "manual" | "live";
 
-const visibleReservationStatuses: ReservationStatus[] = ["pending", "ready_for_pickup", "fulfilled"];
-const cancellableReservationStatuses: ReservationStatus[] = ["pending", "ready_for_pickup"];
+const visibleReservationStatuses: ReservationStatus[] = ["pending", "approved", "ready_for_pickup", "fulfilled", "cancelled", "expired"];
+const cancellableReservationStatuses: ReservationStatus[] = ["pending", "approved", "ready_for_pickup"];
 
 function formatDate(dateValue: string | null) {
   if (!dateValue) return "No date";
@@ -286,7 +286,7 @@ export default function ReservationsPage() {
 
   const reservationMetrics = useMemo(() => {
     const activeReserved = reservations.filter((item) =>
-      item.status === "pending" || item.status === "ready_for_pickup"
+      item.status === "pending" || item.status === "approved" || item.status === "ready_for_pickup"
     ).length;
     const borrowed = reservations.filter((item) => item.status === "fulfilled").length;
 
@@ -448,7 +448,7 @@ export default function ReservationsPage() {
               const isActionLoading = activeAction === `cancel-${reservation.id}`;
               const reservationBook = normalizeReservationBook(reservation.books);
               const authors = normalizeAuthors(reservationBook?.book_authors ?? null);
-              const canCancel = reservation.status === "pending" || reservation.status === "ready_for_pickup";
+              const canCancel = reservation.status === "pending" || reservation.status === "approved" || reservation.status === "ready_for_pickup";
 
               return (
                 <li

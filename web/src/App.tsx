@@ -1,4 +1,13 @@
 import { Navigate, Route, Routes } from "react-router-dom";
+import AdminDashboardPage, {
+  AdminCirculationPage,
+  AdminInventoryPage,
+  AdminOverduePage,
+  AdminReportsPage,
+  AdminSettingsPage,
+  AdminUsersPage,
+  AdminHelpPage,
+} from "./pages/AdminDashboardPage";
 import AuthPage from "./pages/AuthPage";
 import BookDetailsPage from "./pages/BookDetailsPage";
 import CategoryPage from "./pages/CategoryPage";
@@ -22,6 +31,14 @@ export default function App() {
       <Route path="/favorites" element={<FavoritesPage />} />
       <Route path="/settings" element={<SettingsPage />} />
       <Route path="/help" element={<HelpPage />} />
+      <Route path="/admin" element={<AdminDashboardPage />} />
+      <Route path="/admin-inventory" element={<AdminInventoryPage />} />
+      <Route path="/admin-circulation" element={<AdminCirculationPage />} />
+      <Route path="/admin-overdue" element={<AdminOverduePage />} />
+      <Route path="/admin-users" element={<AdminUsersPage />} />
+      <Route path="/admin-reports" element={<AdminReportsPage />} />
+      <Route path="/admin-settings" element={<AdminSettingsPage />} />
+      <Route path="/admin-help" element={<AdminHelpPage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

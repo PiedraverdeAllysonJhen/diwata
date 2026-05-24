@@ -64,7 +64,7 @@ type FavoriteShelf = {
 
 type ActiveReservation = {
   book_id: string;
-  status: "pending" | "ready_for_pickup";
+  status: "pending" | "approved" | "ready_for_pickup";
 };
 
 type Notice = { type: "success" | "error"; text: string };
@@ -362,7 +362,7 @@ export default function FavoritesPage() {
           .from("reservations")
           .select("book_id,status")
           .eq("user_id", session.user.id)
-          .in("status", ["pending", "ready_for_pickup"]),
+          .in("status", ["pending", "approved", "ready_for_pickup"]),
       ]);
 
       if (favResult.error) {

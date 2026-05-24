@@ -29,8 +29,9 @@ function statusLabel(status: string): string {
 }
 
 function notificationTitle(status: string, eventType: "INSERT" | "UPDATE"): string {
-  if (status === "ready_for_pickup") return "Book ready for pickup";
+  if (status === "approved" || status === "ready_for_pickup") return "Book approved for pickup";
   if (status === "fulfilled") return "Reservation completed";
+  if (status === "returned") return "Book returned";
   if (status === "cancelled") return "Reservation cancelled";
   if (status === "expired") return "Reservation expired";
   if (status === "pending" && eventType === "INSERT") return "Reservation submitted";

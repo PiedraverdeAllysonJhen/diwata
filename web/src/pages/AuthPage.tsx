@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { getPostLoginPath } from "../lib/authRouting";
 import { authRedirectBase, hasSupabaseEnv, supabase } from "../lib/supabase";
 
 type AuthMode = "login" | "signup";
@@ -239,7 +240,8 @@ export default function AuthPage() {
       } = await supabase.auth.getSession();
 
       if (session) {
-        navigate("/dashboard", { replace: true });
+        const nextPath = await getPostLoginPath(session.user.id);
+        navigate(nextPath, { replace: true });
       }
     };
 
@@ -309,7 +311,13 @@ export default function AuthPage() {
         if (error) throw error;
 
         setFeedback("Logged in successfully. Redirecting...", "success");
-        navigate("/dashboard", { replace: true });
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        const nextPath = session
+          ? await getPostLoginPath(session.user.id)
+          : "/dashboard";
+        navigate(nextPath, { replace: true });
         return;
       }
 

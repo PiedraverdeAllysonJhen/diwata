@@ -78,7 +78,7 @@ type CategoryRow = {
 
 type ReservationHistoryRow = {
   book_id: string;
-  status: "pending" | "ready_for_pickup" | "fulfilled" | "expired";
+  status: "pending" | "approved" | "ready_for_pickup" | "fulfilled" | "expired";
 };
 
 type FilterAvailability = "all" | "available" | "borrowed" | "reserved";
@@ -285,10 +285,12 @@ function CategoryIconButton({
       onClick={onClick}
       aria-label={name}
       title={name}
-      className="relative flex w-[92px] flex-col items-center gap-1.5 text-center"
+      className={`relative flex min-h-[112px] w-[100px] flex-col items-center justify-center gap-1.5 rounded-2xl border px-2 py-3 text-center shadow-sm transition hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-emerald-500/25 ${
+        active ? "border-emerald-200 bg-emerald-50" : "border-slate-200 bg-white"
+      }`}
     >
       <span
-        className={`flex h-14 w-14 items-center justify-center rounded-2xl transition ${active ? "bg-emerald-700 text-white shadow-lg shadow-emerald-700/25" : "bg-white text-slate-600 hover:text-emerald-700"}`}
+        className={`flex h-14 w-14 items-center justify-center rounded-2xl transition ${active ? "bg-emerald-700 text-white shadow-lg shadow-emerald-700/25" : "bg-slate-50 text-slate-600"}`}
       >
         <CategoryIcon name={name} />
       </span>
@@ -421,6 +423,7 @@ export default function SearchPage() {
           .eq("user_id", session.user.id)
           .in("status", [
             "pending",
+            "approved",
             "ready_for_pickup",
             "fulfilled",
             "expired",
@@ -449,7 +452,7 @@ export default function SearchPage() {
         new Set(
           reservationHistory
             .filter(
-              (e) => e.status === "pending" || e.status === "ready_for_pickup",
+              (e) => e.status === "pending" || e.status === "approved" || e.status === "ready_for_pickup",
             )
             .map((e) => e.book_id),
         ),
@@ -818,10 +821,12 @@ export default function SearchPage() {
               onClick={() => setSelectedCategory("all")}
               aria-label="All categories"
               title="All categories"
-              className="flex w-[92px] flex-col items-center gap-1.5 text-center"
+              className={`flex min-h-[112px] w-[100px] flex-col items-center justify-center gap-1.5 rounded-2xl border px-2 py-3 text-center shadow-sm transition hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-emerald-500/25 ${
+                selectedCategory === "all" ? "border-emerald-200 bg-emerald-50" : "border-slate-200 bg-white"
+              }`}
             >
               <span
-                className={`flex h-14 w-14 items-center justify-center rounded-2xl transition ${selectedCategory === "all" ? "bg-emerald-700 text-white shadow-lg shadow-emerald-700/25" : "bg-white text-slate-600 hover:text-emerald-700"}`}
+                className={`flex h-14 w-14 items-center justify-center rounded-2xl transition ${selectedCategory === "all" ? "bg-emerald-700 text-white shadow-lg shadow-emerald-700/25" : "bg-slate-50 text-slate-600"}`}
               >
                 <svg
                   viewBox="0 0 24 24"

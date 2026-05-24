@@ -1,1 +1,7 @@
-export type BookStatus = "pending" | "cancelled" | "returned" | "overdue";
+export type BookStatus =
+  | "pending"
+  | "approved"
+  | "cancelled"
+  | "picked_up"
+  | "returned"
+  | "overdue";
