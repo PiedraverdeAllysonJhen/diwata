@@ -399,7 +399,7 @@ export default function ReservationsPage() {
       statusBar={
         <PortalLiveIndicator
           isSyncing={isLiveSyncing}
-          text={`${isLiveSyncing ? "Syncing live updates..." : "Live availability active"} | ${formatLastSync(lastSyncedAt)}`}
+          text={`${isLiveSyncing ? "Syncing reservations..." : "Reservation activity synced"} | ${formatLastSync(lastSyncedAt)}`}
         />
       }
       notice={notice ? <p className={`status ${notice.type} portal-notice`}>{notice.text}</p> : undefined}
