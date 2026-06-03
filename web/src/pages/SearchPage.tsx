@@ -9,6 +9,7 @@ import {
 import { Session } from "@supabase/supabase-js";
 import { useNavigate } from "react-router-dom";
 import CatalogBookCard from "../components/CatalogBookCard";
+import ReservationCalendarModal from "../components/ReservationCalendarModal";
 import PortalLiveIndicator from "../components/PortalLiveIndicator";
 import LibraryWorkspaceLayout from "../components/LibraryWorkspaceLayout";
 import { useReservationNotifier } from "../hooks/useReservationNotifier";
@@ -46,6 +47,7 @@ type RawBookRecord = {
   cover_image_url: string | null;
   available_copies: number;
   total_copies: number;
+  created_at: string;
   tags: string[] | null;
   book_copies: RawCopyStatusRelation[] | null;
   book_categories: RawCategoryRelation[] | null;
@@ -65,6 +67,7 @@ type SearchBook = {
   coverImageUrl: string | null;
   availableCopies: number;
   totalCopies: number;
+  createdAt: string;
   tags: string[];
   copyStatuses: string[];
   categories: string[];
@@ -78,7 +81,16 @@ type CategoryRow = {
 
 type ReservationHistoryRow = {
   book_id: string;
-  status: "pending" | "approved" | "ready_for_pickup" | "fulfilled" | "expired";
+  status:
+    | "pending"
+    | "approved"
+    | "ready_for_pickup"
+    | "reserved"
+    | "queued"
+    | "picked_up"
+    | "fulfilled"
+    | "returned"
+    | "expired";
 };
 
 type FilterAvailability = "all" | "available" | "borrowed" | "reserved";
@@ -141,6 +153,7 @@ function normalizeBook(record: RawBookRecord): SearchBook {
     coverImageUrl: record.cover_image_url,
     availableCopies: record.available_copies,
     totalCopies: record.total_copies,
+    createdAt: record.created_at,
     tags: normalizeTags(record.tags),
     copyStatuses: normalizeCopyStatuses(record.book_copies),
     categories: normalizeCategories(record.book_categories),
@@ -361,6 +374,9 @@ export default function SearchPage() {
   const [activeReserveBookId, setActiveReserveBookId] = useState<string | null>(
     null,
   );
+  const [reservationBook, setReservationBook] = useState<SearchBook | null>(
+    null,
+  );
 
   useEffect(() => {
     let isMounted = true;
@@ -409,7 +425,7 @@ export default function SearchPage() {
         supabase
           .from("books")
           .select(
-            "id,isbn,title,subtitle,description,publisher,language,publication_year,publication_date,cover_image_url,available_copies,total_copies,tags,book_copies(status),book_categories(category_id,categories(id,name)),book_authors(author_id,authors(id,name))",
+            "id,isbn,title,subtitle,description,publisher,language,publication_year,publication_date,cover_image_url,available_copies,total_copies,created_at,tags,book_copies(status),book_categories(category_id,categories(id,name)),book_authors(author_id,authors(id,name))",
           )
           .order("title", { ascending: true })
           .limit(300),
@@ -425,7 +441,11 @@ export default function SearchPage() {
             "pending",
             "approved",
             "ready_for_pickup",
+            "reserved",
+            "queued",
+            "picked_up",
             "fulfilled",
+            "returned",
             "expired",
           ]),
       ]);
@@ -452,7 +472,13 @@ export default function SearchPage() {
         new Set(
           reservationHistory
             .filter(
-              (e) => e.status === "pending" || e.status === "approved" || e.status === "ready_for_pickup",
+              (e) =>
+                e.status === "approved" ||
+                e.status === "pending" ||
+                e.status === "ready_for_pickup" ||
+                e.status === "reserved" ||
+                e.status === "queued" ||
+                e.status === "picked_up",
             )
             .map((e) => e.book_id),
         ),
@@ -460,7 +486,12 @@ export default function SearchPage() {
       setBorrowedHistoryBookIds(
         new Set(
           reservationHistory
-            .filter((e) => e.status === "fulfilled" || e.status === "expired")
+            .filter(
+              (e) =>
+                e.status === "fulfilled" ||
+                e.status === "returned" ||
+                e.status === "expired",
+            )
             .map((e) => e.book_id),
         ),
       );
@@ -617,6 +648,17 @@ export default function SearchPage() {
       .slice(0, 8);
   }, [books]);
 
+  const newBooks = useMemo(() => {
+    return [...books]
+      .sort((l, r) => {
+        const timeL = new Date(l.createdAt).getTime();
+        const timeR = new Date(r.createdAt).getTime();
+        if (timeL !== timeR) return timeR - timeL;
+        return l.title.localeCompare(r.title);
+      })
+      .slice(0, 4);
+  }, [books]);
+
   const isFocusedBrowse =
     searchQuery.trim().length > 0 ||
     selectedCategory !== "all" ||
@@ -636,24 +678,9 @@ export default function SearchPage() {
     setAvailabilityFilter("all");
   };
 
-  const handleReserveBook = async (bookId: string) => {
-    if (!session?.user.id) return;
-    setActiveReserveBookId(bookId);
+  const openReservationModal = (book: SearchBook) => {
     setNotice("");
-    const { error } = await supabase
-      .from("reservations")
-      .insert({ user_id: session.user.id, book_id: bookId, status: "pending" });
-    if (error) {
-      setNotice(
-        error.code === "23505" || /duplicate/i.test(error.message)
-          ? "You already have an active reservation for this book."
-          : error.message,
-      );
-      setActiveReserveBookId(null);
-      return;
-    }
-    setReservedBookIds((previous) => new Set([...previous, bookId]));
-    setActiveReserveBookId(null);
+    setReservationBook(book);
   };
 
   const handleSignOut = async () => {
@@ -865,6 +892,63 @@ export default function SearchPage() {
             <div className="mb-5 flex items-end justify-between gap-4">
               <div>
                 <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-emerald-700">
+                  New Books
+                </p>
+                <h2 className="mt-2 text-xl font-semibold tracking-tight text-slate-900">
+                  Recently added titles
+                </h2>
+                <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500">
+                  Fresh catalog records appear here as soon as they are added by the library team.
+                </p>
+              </div>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              {newBooks.map((book) => {
+                const availability = getAvailabilityState(book);
+                const isReserved = reservedBookIds.has(book.id);
+                const isSaving = activeReserveBookId === book.id;
+                const canReserve = !isReserved && availability === "available";
+                return (
+                  <CatalogBookCard
+                    key={book.id}
+                    title={book.title}
+                    subtitle={book.subtitle ?? book.publisher ?? "New catalog record"}
+                    authorLine={`By ${formatAuthorLine(book.authors)}`}
+                    coverImageUrl={book.coverImageUrl}
+                    availabilityLabel={isReserved ? "Reserved" : getAvailabilityLabel(availability)}
+                    availabilityTone={isReserved ? "reserved" : availability}
+                    metaItems={[
+                      formatPublicationLabel(book.publicationDate, book.publicationYear),
+                      `${book.availableCopies} available of ${book.totalCopies}`,
+                      book.language ?? "Language not set",
+                    ]}
+                    actionLabel={
+                      isSaving
+                        ? "Saving..."
+                        : canReserve
+                          ? "Reserve"
+                          : isReserved
+                            ? "Reserved"
+                            : "Unavailable"
+                    }
+                    actionDisabled={!canReserve || isSaving}
+                    hasBorrowedBefore={borrowedHistoryBookIds.has(book.id)}
+                    onOpenDetails={() => navigate(`/books/${book.id}`)}
+                    onAction={() => {
+                      openReservationModal(book);
+                    }}
+                  />
+                );
+              })}
+            </div>
+          </section>
+        ) : null}
+
+        {!isFocusedBrowse ? (
+          <section className="rounded-[1.8rem] border border-slate-200 bg-white/95 p-5 shadow-[0_20px_50px_rgba(15,23,42,0.06)]">
+            <div className="mb-5 flex items-end justify-between gap-4">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-emerald-700">
                   Recommendations
                 </p>
                 <h2 className="mt-2 text-xl font-semibold tracking-tight text-slate-900">
@@ -924,7 +1008,7 @@ export default function SearchPage() {
                     hasBorrowedBefore={borrowedHistoryBookIds.has(book.id)}
                     onOpenDetails={() => navigate(`/books/${book.id}`)}
                     onAction={() => {
-                      void handleReserveBook(book.id);
+                      openReservationModal(book);
                     }}
                   />
                 );
@@ -1011,7 +1095,7 @@ export default function SearchPage() {
                     hasBorrowedBefore={borrowedHistoryBookIds.has(book.id)}
                     onOpenDetails={() => navigate(`/books/${book.id}`)}
                     onAction={() => {
-                      void handleReserveBook(book.id);
+                      openReservationModal(book);
                     }}
                   />
                 );
@@ -1020,6 +1104,21 @@ export default function SearchPage() {
           )}
         </section>
       </div>
+      {reservationBook ? (
+        <ReservationCalendarModal
+          bookId={reservationBook.id}
+          title={reservationBook.title}
+          totalCopies={reservationBook.totalCopies}
+          onClose={() => setReservationBook(null)}
+          onError={setNotice}
+          onComplete={async (bookId, _status, message) => {
+            setReservedBookIds((previous) => new Set([...previous, bookId]));
+            setReservationBook(null);
+            await loadCatalog("live");
+            setNotice(message);
+          }}
+        />
+      ) : null}
     </LibraryWorkspaceLayout>
   );
 }

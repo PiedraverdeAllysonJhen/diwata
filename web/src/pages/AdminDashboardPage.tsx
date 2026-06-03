@@ -16,8 +16,9 @@ import { getUserRole, isStaffUser } from "../lib/authRouting";
 import { hasSupabaseEnv, supabase } from "../lib/supabase";
 
 type TransactionStatus =
-  | "pending"
   | "approved"
+  | "reserved"
+  | "queued"
   | "picked_up"
   | "returned"
   | "overdue"
@@ -36,8 +37,12 @@ type Transaction = {
   date: string;
   occurredAt: string;
   dueAt?: string;
+  reservationStart?: string;
+  reservationEnd?: string;
   pickedUpAt?: string;
+  returnedAt?: string;
   approvedAt?: string;
+  fineAmount?: number;
   userId?: string;
   bookId?: string;
   copyId?: string | null;
@@ -69,8 +74,13 @@ type PickupRecord = {
   studentId: string;
   book: string;
   reservedAt: string;
+  startDate: string;
+  startDateValue: string;
+  endDate: string;
+  endDateValue: string;
   deadline: string;
   approvedAt: string | null;
+  fineAmount: number;
 };
 
 type OverdueLoan = {
@@ -103,7 +113,7 @@ type UserHistoryEntry = {
 type AdminMetrics = {
   totalBooks: number;
   activeLoans: number;
-  pendingPickups: number;
+  pickupQueueCount: number;
   overdueBooks: number;
   availableBooks: number;
   reservedBooks: number;
@@ -161,7 +171,7 @@ const defaultAdminConfig: AdminConfig = {
 const emptyMetrics: AdminMetrics = {
   totalBooks: 0,
   activeLoans: 0,
-  pendingPickups: 0,
+  pickupQueueCount: 0,
   overdueBooks: 0,
   availableBooks: 0,
   reservedBooks: 0,
@@ -169,8 +179,9 @@ const emptyMetrics: AdminMetrics = {
 };
 
 const STATUS_CONFIG: Record<TransactionStatus, { label: string; classes: string }> = {
-  pending: { label: "Pending", classes: "border-slate-200 bg-slate-50 text-slate-600" },
   approved: { label: "Approved", classes: "border-emerald-200 bg-emerald-50 text-emerald-700" },
+  reserved: { label: "Reserved", classes: "border-emerald-200 bg-emerald-50 text-emerald-700" },
+  queued: { label: "Queued", classes: "border-amber-200 bg-amber-50 text-amber-700" },
   cancelled: { label: "Cancelled", classes: "border-amber-200 bg-amber-50 text-amber-700" },
   picked_up: { label: "Picked up", classes: "border-teal-200 bg-teal-50 text-teal-700" },
   returned: { label: "Returned", classes: "border-indigo-200 bg-indigo-50 text-indigo-700" },
@@ -233,10 +244,14 @@ function getCopyBookTitle(copy: unknown): string {
 }
 
 function mapReservationStatus(status: string): TransactionStatus {
+  if (status === "reserved") return "reserved";
+  if (status === "queued") return "queued";
+  if (status === "picked_up") return "picked_up";
+  if (status === "returned") return "returned";
   if (status === "approved" || status === "ready_for_pickup") return "approved";
   if (status === "fulfilled") return "picked_up";
   if (status === "cancelled" || status === "expired") return "cancelled";
-  return "pending";
+  return "reserved";
 }
 
 function mapLoanStatus(status: string): TransactionStatus {
@@ -421,7 +436,7 @@ function useAdminData(): AdminData {
         .order("title", { ascending: true }),
       supabase
         .from("reservations")
-        .select("id,status,requested_at,approved_at,expires_at,fulfilled_at,cancelled_at,user_id,book_id,copy_id,books(title)")
+        .select("id,status,requested_at,approved_at,expires_at,fulfilled_at,cancelled_at,reservation_start_date,reservation_end_date,picked_up_at,returned_at,fine_amount,user_id,book_id,copy_id,books(title)")
         .order("requested_at", { ascending: false })
         .limit(80),
       supabase
@@ -526,7 +541,14 @@ function useAdminData(): AdminData {
 
     const reservationTransactions: Transaction[] = reservationRows.map((reservation) => {
       const profile = profileById.get(String(reservation.user_id));
-      const occurredAt = String(reservation.cancelled_at ?? reservation.fulfilled_at ?? reservation.approved_at ?? reservation.requested_at ?? "");
+      const occurredAt = String(reservation.returned_at ?? reservation.picked_up_at ?? reservation.cancelled_at ?? reservation.fulfilled_at ?? reservation.approved_at ?? reservation.requested_at ?? "");
+      const dueAt = String(reservation.reservation_end_date ?? reservation.expires_at ?? "");
+      const dueDate = dueAt ? new Date(dueAt) : null;
+      const returnedAt = reservation.returned_at ? new Date(String(reservation.returned_at)) : null;
+      const compareDate = returnedAt ?? now;
+      const overdueDays = dueDate && !Number.isNaN(dueDate.getTime())
+        ? Math.max(0, Math.ceil((compareDate.getTime() - dueDate.getTime()) / 86400000))
+        : 0;
       return {
         id: `RES-${String(reservation.id).slice(0, 8)}`,
         sourceId: String(reservation.id),
@@ -536,6 +558,12 @@ function useAdminData(): AdminData {
         status: mapReservationStatus(String(reservation.status)),
         date: formatDate(occurredAt),
         occurredAt,
+        dueAt,
+        reservationStart: reservation.reservation_start_date ? String(reservation.reservation_start_date) : undefined,
+        reservationEnd: reservation.reservation_end_date ? String(reservation.reservation_end_date) : undefined,
+        pickedUpAt: reservation.picked_up_at ? String(reservation.picked_up_at) : undefined,
+        returnedAt: reservation.returned_at ? String(reservation.returned_at) : undefined,
+        fineAmount: Number(reservation.fine_amount ?? overdueDays * config.fineRatePesos),
         approvedAt: reservation.approved_at ? String(reservation.approved_at) : undefined,
         userId: String(reservation.user_id),
         bookId: String(reservation.book_id),
@@ -558,13 +586,19 @@ function useAdminData(): AdminData {
         occurredAt,
         dueAt: loan.due_at ? String(loan.due_at) : undefined,
         pickedUpAt: loan.picked_up_at ? String(loan.picked_up_at) : String(loan.checked_out_at ?? ""),
+        returnedAt: loan.returned_at ? String(loan.returned_at) : undefined,
+        fineAmount: Number(loan.fine_amount ?? 0),
         userId: String(loan.user_id),
         copyId: loan.copy_id ? String(loan.copy_id) : null,
       };
     });
 
     const nextPickups = reservationRows
-      .filter((reservation) => ["pending", "approved", "ready_for_pickup"].includes(String(reservation.status)))
+      .filter((reservation) =>
+        ["reserved", "approved", "ready_for_pickup"].includes(
+          String(reservation.status),
+        ),
+      )
       .map((reservation) => {
         const profile = profileById.get(String(reservation.user_id));
         return {
@@ -579,8 +613,13 @@ function useAdminData(): AdminData {
           studentId: String(profile?.student_number ?? "No student ID"),
           book: getBookTitle(reservation.books),
           reservedAt: formatDate(String(reservation.requested_at ?? "")),
-          deadline: formatDate(String(reservation.expires_at ?? new Date(new Date(String(reservation.requested_at ?? now.toISOString())).getTime() + config.pickupWindowHours * 3600000).toISOString())),
+          startDate: formatDate(String(reservation.reservation_start_date ?? reservation.requested_at ?? "")),
+          startDateValue: String(reservation.reservation_start_date ?? reservation.requested_at ?? ""),
+          endDate: formatDate(String(reservation.reservation_end_date ?? reservation.expires_at ?? "")),
+          endDateValue: String(reservation.reservation_end_date ?? reservation.expires_at ?? ""),
+          deadline: formatDate(String(reservation.reservation_end_date ?? reservation.expires_at ?? "")),
           approvedAt: reservation.approved_at ? String(reservation.approved_at) : null,
+          fineAmount: Number(reservation.fine_amount ?? 0),
         };
       });
 
@@ -641,7 +680,7 @@ function useAdminData(): AdminData {
     });
 
     const borrowedBooks = loanRows.filter((loan) => loan.status === "active" || loan.status === "picked_up" || loan.status === "overdue").length;
-    const reservedBooks = reservationRows.filter((reservation) => ["pending", "approved", "ready_for_pickup"].includes(String(reservation.status))).length;
+    const reservedBooks = reservationRows.filter((reservation) => ["reserved", "approved", "ready_for_pickup"].includes(String(reservation.status))).length;
     const availableBooks = nextBooks.reduce((sum, book) => {
       if (book.status === "Available") return sum + book.copies;
       return sum;
@@ -675,7 +714,7 @@ function useAdminData(): AdminData {
     setMetrics({
       totalBooks: nextBooks.reduce((sum, book) => sum + book.copies, 0),
       activeLoans: borrowedBooks,
-      pendingPickups: nextPickups.length,
+      pickupQueueCount: nextPickups.length,
       overdueBooks: nextOverdueLoans.length,
       availableBooks,
       reservedBooks,
@@ -765,8 +804,8 @@ function useAdminData(): AdminData {
 
   const approveCheckout = useCallback(async (pickup: PickupRecord, pickupWindowHours: number) => {
     const status = pickup.status.toLowerCase();
-    if (!["pending", "ready_for_pickup"].includes(status)) {
-      setNotice("Only pending or ready pickup reservations can be approved.");
+    if (!["reserved", "ready_for_pickup"].includes(status)) {
+      setNotice("Only reserved or ready pickup reservations can be approved.");
       return;
     }
     const approvedAt = new Date();
@@ -775,7 +814,7 @@ function useAdminData(): AdminData {
       .from("reservations")
       .update({ status: "approved", approved_at: approvedAt.toISOString(), expires_at: expiresAt })
       .eq("id", pickup.reservationId)
-      .in("status", ["pending", "ready_for_pickup"]);
+      .in("status", ["reserved", "ready_for_pickup"]);
     if (error) {
       setNotice(error.message);
       return;
@@ -791,19 +830,20 @@ function useAdminData(): AdminData {
   }, [refresh]);
 
   const markPickedUp = useCallback(async (pickup: PickupRecord, loanDays: number) => {
-    if (pickup.status.toLowerCase() !== "approved") {
-      setNotice("Only approved reservations can be marked as picked up.");
+    if (!["reserved", "approved", "ready_for_pickup"].includes(pickup.status.toLowerCase())) {
+      setNotice("Only active reservations can be marked as picked up.");
       return;
     }
 
     const {
       data: { session },
     } = await supabase.auth.getSession();
-    const dueAt = new Date(Date.now() + loanDays * 86400000).toISOString();
+    const dueAt = new Date(pickup.endDateValue);
+    const fallbackDueAt = new Date(Date.now() + loanDays * 86400000);
     const { data, error } = await supabase.rpc("admin_mark_reservation_picked_up", {
       target_reservation_id: pickup.reservationId,
       checkout_by: session?.user.id ?? null,
-      due_timestamp: dueAt,
+      due_timestamp: Number.isNaN(dueAt.getTime()) ? fallbackDueAt.toISOString() : dueAt.toISOString(),
     });
     if (error) {
       setNotice(error.message);
@@ -814,14 +854,6 @@ function useAdminData(): AdminData {
       setNotice("Reservation was already processed or no available physical copy was found.");
       return;
     }
-    await supabase.from("notifications").insert({
-      user_id: pickup.userId,
-      type: "loan_checked_out",
-      title: "Book picked up",
-      message: `${pickup.book} has been marked as picked up. Please return it by ${new Date(dueAt).toLocaleString()}.`,
-      action_url: "/reservations",
-    });
-
     await refresh();
   }, [refresh]);
 
@@ -1008,7 +1040,7 @@ function AdminShell({
         onMarkAllRead: notifier.markAllAsRead,
       }}
       sidebarStats={[
-        { label: "Pending", value: String(sidebarData.metrics.pendingPickups) },
+        { label: "Pickup Queue", value: String(sidebarData.metrics.pickupQueueCount) },
         { label: "Overdue", value: String(sidebarData.metrics.overdueBooks) },
       ]}
       sidebarAction={{
@@ -1043,7 +1075,7 @@ function AdminDashboard() {
   const statData = [
     { label: "Total Books", value: String(adminData.metrics.totalBooks), note: "Inventory across active catalog", accent: "bg-emerald-500", noteClass: "text-emerald-600" },
     { label: "Active Loans", value: String(adminData.metrics.activeLoans), note: "Borrowed books currently out", accent: "bg-sky-500", noteClass: "text-sky-600" },
-    { label: "Pending Pickups", value: String(adminData.metrics.pendingPickups), note: "Awaiting librarian verification", accent: "bg-amber-500", noteClass: "text-amber-600" },
+    { label: "Pickup Queue", value: String(adminData.metrics.pickupQueueCount), note: "Awaiting librarian verification", accent: "bg-amber-500", noteClass: "text-amber-600" },
     { label: "Overdue Books", value: String(adminData.metrics.overdueBooks), note: "Past due or marked overdue", accent: "bg-rose-500", noteClass: "text-rose-600" },
   ];
 
@@ -1084,7 +1116,7 @@ function AdminDashboard() {
           <div className="flex flex-wrap items-center gap-2">
             <input className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-sm outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-600/20" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search book, patron, ID" />
             <select className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-emerald-600" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
-              {["all", "pending", "approved", "picked_up", "overdue", "returned", "cancelled"].map((status) => <option key={status} value={status}>{status === "all" ? "All Status" : status.replace(/_/g, " ")}</option>)}
+              {["all", "reserved", "approved", "queued", "picked_up", "overdue", "returned", "cancelled"].map((status) => <option key={status} value={status}>{status === "all" ? "All Status" : status.replace(/_/g, " ")}</option>)}
             </select>
           </div>
         </div>
@@ -1105,10 +1137,10 @@ function AdminTransactionTable({
 }) {
   return (
     <div className="mt-5 overflow-x-auto">
-      <table className="w-full min-w-[720px]">
+      <table className="w-full min-w-[980px]">
         <thead>
           <tr className="border-b border-slate-100 bg-slate-50/60">
-            {["Transaction ID", "Book Title", "Patron", "Type", "Status", "Date", "Actions"].map((heading) => (
+            {["Transaction ID", "Book Title", "Patron", "Type", "Status", "Start", "Due", "Picked Up", "Returned", "Fine", "Actions"].map((heading) => (
               <th key={heading} className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">{heading}</th>
             ))}
           </tr>
@@ -1121,11 +1153,14 @@ function AdminTransactionTable({
               <td className="px-4 py-3.5 text-sm text-slate-600">{tx.patron}</td>
               <td className="px-4 py-3.5"><Badge classes="border-slate-200 bg-slate-50 text-slate-500">{tx.type}</Badge></td>
               <td className="px-4 py-3.5"><Badge classes={STATUS_CONFIG[tx.status].classes}>{STATUS_CONFIG[tx.status].label}</Badge></td>
-              <td className="px-4 py-3.5 text-xs text-slate-400">{tx.date}</td>
+              <td className="px-4 py-3.5 text-xs text-slate-400">{formatDate(tx.reservationStart ?? tx.pickedUpAt ?? tx.occurredAt)}</td>
+              <td className="px-4 py-3.5 text-xs text-slate-400">{formatDate(tx.reservationEnd ?? tx.dueAt)}</td>
+              <td className="px-4 py-3.5 text-xs text-slate-400">{formatDate(tx.pickedUpAt)}</td>
+              <td className="px-4 py-3.5 text-xs text-slate-400">{formatDate(tx.returnedAt)}</td>
+              <td className="px-4 py-3.5 text-xs font-semibold text-slate-600">{formatMoney(tx.fineAmount ?? 0)}</td>
               <td className="px-4 py-3.5">
                 <div className="flex flex-wrap items-center gap-1.5">
                   <button className="cursor-pointer rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-600 transition hover:border-emerald-300 hover:text-emerald-700" onClick={() => onView?.(tx)}>View</button>
-                  {tx.status === "pending" ? <button className="admin-action-button rounded-lg bg-emerald-700 px-2.5 py-1 text-xs font-semibold text-white">Approve Pickup</button> : null}
                   {tx.type === "Loan" && ["picked_up", "overdue"].includes(tx.status) ? <button className="admin-action-button rounded-lg bg-sky-700 px-2.5 py-1 text-xs font-semibold text-white" onClick={() => onProcessReturn?.(tx)}>Process Return</button> : null}
                 </div>
               </td>
@@ -1321,7 +1356,6 @@ function AdminCirculation() {
   const [config] = useState(getStoredAdminConfig);
   const [query, setQuery] = useState("");
   const [returnQuery, setReturnQuery] = useState("");
-  const [nowTick, setNowTick] = useState(Date.now());
   const [viewTransaction, setViewTransaction] = useState<Transaction | null>(null);
   const filteredQueue = adminData.pickupQueue.filter((item) => `${item.id} ${item.student} ${item.book}`.toLowerCase().includes(query.toLowerCase()));
   const loanRows = adminData.transactions.filter((tx) => tx.type === "Loan" || tx.type === "Return");
@@ -1333,24 +1367,13 @@ function AdminCirculation() {
     );
     if (match) void adminData.processReturn(match);
   };
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      setNowTick(Date.now());
-      for (const item of adminData.pickupQueue) {
-        if (item.status.toLowerCase() === "approved" && getCountdown(item.approvedAt, config.pickupWindowHours).expired) {
-          void adminData.cancelReservation(item, "expired");
-        }
-      }
-    }, 30000);
-    return () => window.clearInterval(timer);
-  }, [adminData]);
   return (
     <>
       <Panel>
         <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
           <div>
             <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-emerald-700">Pickup Verification</p>
-            <h2 className="mt-1.5 text-xl font-semibold tracking-tight text-slate-900">Pending pickup queue</h2>
+            <h2 className="mt-1.5 text-xl font-semibold tracking-tight text-slate-900">Pickup queue</h2>
             {adminData.notice ? <p className="mt-1 text-xs text-rose-600">{adminData.notice}</p> : null}
           </div>
           <input className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-sm outline-none focus:border-emerald-600" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search transaction, student, book" />
@@ -1363,40 +1386,25 @@ function AdminCirculation() {
                   <p className="font-mono text-xs text-slate-400">{item.id}</p>
                   <h3 className="mt-1 text-sm font-semibold text-slate-900">{item.book}</h3>
                   <p className="text-sm text-slate-500">{item.student} | {item.email} | {item.studentId}</p>
-                  <p className="mt-1 text-xs text-slate-400">Reserved {item.reservedAt} | Pickup deadline {item.deadline}</p>
-                  {item.status.toLowerCase() === "approved" ? (
-                    <span className={`mt-2 inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${
-                      getCountdown(item.approvedAt, config.pickupWindowHours).ms < 2 * 3600000
-                        ? "border-rose-200 bg-rose-50 text-rose-700"
-                        : getCountdown(item.approvedAt, config.pickupWindowHours).ms < 8 * 3600000
-                          ? "border-amber-200 bg-amber-50 text-amber-700"
-                          : "border-slate-200 bg-slate-50 text-slate-600"
-                    }`}>
-                      Pickup timer: {nowTick ? getCountdown(item.approvedAt, config.pickupWindowHours).label : getCountdown(item.approvedAt, config.pickupWindowHours).label} remaining
-                    </span>
-                  ) : null}
+                  <p className="mt-1 text-xs text-slate-400">Reserved {item.reservedAt} | Reservation {item.startDate} to {item.endDate}</p>
+                  <span className="mt-2 inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
+                    Ready for pickup
+                  </span>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <button
-                    className="admin-action-button rounded-xl bg-emerald-700 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-45"
-                    disabled={!["pending", "ready_for_pickup"].includes(item.status.toLowerCase())}
-                    onClick={() => { void adminData.approveCheckout(item, config.pickupWindowHours); }}
-                  >
-                    Approve Checkout
-                  </button>
-                  <button
                     className="admin-action-button rounded-xl bg-teal-700 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-45"
-                    disabled={item.status.toLowerCase() !== "approved"}
+                    disabled={!["reserved", "approved", "ready_for_pickup"].includes(item.status.toLowerCase())}
                     onClick={() => { void adminData.markPickedUp(item, config.loanDurationDays); }}
                   >
-                    Mark Picked Up
+                    Picked Up
                   </button>
                   <button className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-700" onClick={() => { void adminData.cancelReservation(item, "manual"); }}>Cancel Reservation</button>
                 </div>
               </div>
             </article>
           ))}
-          {!adminData.isLoading && filteredQueue.length === 0 ? <p className="rounded-[1.25rem] border border-dashed border-slate-200 p-6 text-center text-sm text-slate-400">No pending pickups are in the database right now.</p> : null}
+          {!adminData.isLoading && filteredQueue.length === 0 ? <p className="rounded-[1.25rem] border border-dashed border-slate-200 p-6 text-center text-sm text-slate-400">No pickup records are in the database right now.</p> : null}
         </div>
       </Panel>
       <Panel>
@@ -1716,7 +1724,7 @@ function AdminReports() {
         <div className="mt-5 grid gap-4 lg:grid-cols-2">
           <article className="rounded-[1.25rem] border border-slate-200 p-4"><h3 className="font-semibold text-slate-900">Most Borrowed Books</h3>{rangedMostBorrowed.length > 0 ? rangedMostBorrowed.map((book, index) => <p key={book.title} className="mt-3 flex justify-between text-sm text-slate-600"><span>{index + 1}. {book.title}</span><strong>{book.count}</strong></p>) : <p className="mt-3 text-sm text-slate-400">No loan activity has been recorded in this date range.</p>}</article>
           <article className="rounded-[1.25rem] border border-slate-200 p-4"><h3 className="font-semibold text-slate-900">Inventory Status Breakdown</h3>{[`Available ${adminData.metrics.availableBooks}`, `Reserved ${adminData.metrics.reservedBooks}`, `Borrowed ${adminData.metrics.borrowedBooks}`, `Total ${adminData.metrics.totalBooks}`].map((item) => <p key={item} className="mt-3 text-sm text-slate-600">{item}</p>)}</article>
-          <article className="rounded-[1.25rem] border border-slate-200 p-4"><h3 className="font-semibold text-slate-900">Active User Activity</h3><p className="mt-3 text-sm text-slate-600">{adminData.users.length} readable users, {rangedSummary.checkouts} range checkouts, {adminData.metrics.pendingPickups} pending pickups.</p></article>
+          <article className="rounded-[1.25rem] border border-slate-200 p-4"><h3 className="font-semibold text-slate-900">Active User Activity</h3><p className="mt-3 text-sm text-slate-600">{adminData.users.length} readable users, {rangedSummary.checkouts} range checkouts, {adminData.metrics.pickupQueueCount} pickup records.</p></article>
           <article className="rounded-[1.25rem] border border-slate-200 p-4"><h3 className="font-semibold text-slate-900">Overdue Trend</h3><p className="mt-3 text-sm text-slate-600">{rangedSummary.overdue} overdue transaction records appear in the selected date window.</p></article>
         </div>
       </Panel>

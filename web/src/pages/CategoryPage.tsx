@@ -2,6 +2,7 @@ import { ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { Session } from "@supabase/supabase-js";
 import { useNavigate } from "react-router-dom";
 import CatalogBookCard from "../components/CatalogBookCard";
+import ReservationCalendarModal from "../components/ReservationCalendarModal";
 import PortalLiveIndicator from "../components/PortalLiveIndicator";
 import LibraryWorkspaceLayout from "../components/LibraryWorkspaceLayout";
 import { useReservationNotifier } from "../hooks/useReservationNotifier";
@@ -70,7 +71,16 @@ type CategoryRow = {
 
 type ReservationHistoryRow = {
   book_id: string;
-  status: "pending" | "approved" | "ready_for_pickup" | "fulfilled" | "expired";
+  status:
+    | "pending"
+    | "approved"
+    | "ready_for_pickup"
+    | "reserved"
+    | "queued"
+    | "picked_up"
+    | "fulfilled"
+    | "returned"
+    | "expired";
 };
 
 type LoadSource = "manual" | "live";
@@ -337,6 +347,9 @@ export default function CategoryPage() {
   const [activeReserveBookId, setActiveReserveBookId] = useState<string | null>(
     null,
   );
+  const [reservationBook, setReservationBook] = useState<BookRecord | null>(
+    null,
+  );
 
   useEffect(() => {
     let isMounted = true;
@@ -401,7 +414,11 @@ export default function CategoryPage() {
             "pending",
             "approved",
             "ready_for_pickup",
+            "reserved",
+            "queued",
+            "picked_up",
             "fulfilled",
+            "returned",
             "expired",
           ]),
       ]);
@@ -428,7 +445,13 @@ export default function CategoryPage() {
         new Set(
           reservationHistory
             .filter(
-              (e) => e.status === "pending" || e.status === "approved" || e.status === "ready_for_pickup",
+              (e) =>
+                e.status === "approved" ||
+                e.status === "pending" ||
+                e.status === "ready_for_pickup" ||
+                e.status === "reserved" ||
+                e.status === "queued" ||
+                e.status === "picked_up",
             )
             .map((e) => e.book_id),
         ),
@@ -436,7 +459,12 @@ export default function CategoryPage() {
       setBorrowedHistoryBookIds(
         new Set(
           reservationHistory
-            .filter((e) => e.status === "fulfilled" || e.status === "expired")
+            .filter(
+              (e) =>
+                e.status === "fulfilled" ||
+                e.status === "returned" ||
+                e.status === "expired",
+            )
             .map((e) => e.book_id),
         ),
       );
@@ -562,27 +590,9 @@ export default function CategoryPage() {
     navigate("/", { replace: true });
   };
 
-  const handleReserveBook = async (bookId: string) => {
-    if (!session?.user.id) return;
-    setActiveReserveBookId(bookId);
+  const openReservationModal = (book: BookRecord) => {
     setNotice(null);
-    const { error } = await supabase
-      .from("reservations")
-      .insert({ user_id: session.user.id, book_id: bookId, status: "pending" });
-    if (error) {
-      setNotice({
-        type: "error",
-        text:
-          error.code === "23505" || /duplicate/i.test(error.message)
-            ? "You already have an active reservation for this book."
-            : error.message,
-      });
-      setActiveReserveBookId(null);
-      return;
-    }
-    setReservedBookIds((previous) => new Set([...previous, bookId]));
-    setNotice({ type: "success", text: "Reservation created successfully." });
-    setActiveReserveBookId(null);
+    setReservationBook(book);
   };
 
   const userEmail = session?.user.email ?? "student@vsu.edu.ph";
@@ -791,7 +801,7 @@ export default function CategoryPage() {
                     hasBorrowedBefore={borrowedHistoryBookIds.has(book.id)}
                     onOpenDetails={() => navigate(`/books/${book.id}`)}
                     onAction={() => {
-                      void handleReserveBook(book.id);
+                      openReservationModal(book);
                     }}
                   />
                 );
@@ -800,6 +810,21 @@ export default function CategoryPage() {
           )}
         </section>
       </div>
+      {reservationBook ? (
+        <ReservationCalendarModal
+          bookId={reservationBook.id}
+          title={reservationBook.title}
+          totalCopies={reservationBook.totalCopies}
+          onClose={() => setReservationBook(null)}
+          onError={(message) => setNotice({ type: "error", text: message })}
+          onComplete={async (bookId, _status, message) => {
+            setReservedBookIds((previous) => new Set([...previous, bookId]));
+            setReservationBook(null);
+            await loadData("live");
+            setNotice({ type: "success", text: message });
+          }}
+        />
+      ) : null}
     </LibraryWorkspaceLayout>
   );
 }
