@@ -14,13 +14,28 @@ type ReservationBook = {
   cover_image_url: string | null;
 };
 
-type LibraryReservationStatus = "pending" | "approved" | "ready_for_pickup" | "fulfilled" | "cancelled" | "expired" | "returned" | "overdue";
+type LibraryReservationStatus =
+  | "pending"
+  | "approved"
+  | "ready_for_pickup"
+  | "reserved"
+  | "queued"
+  | "picked_up"
+  | "fulfilled"
+  | "cancelled"
+  | "expired"
+  | "returned"
+  | "overdue";
 
 type ReservationRecord = {
   id: string;
   status: LibraryReservationStatus;
   requested_at: string;
   expires_at: string | null;
+  reservation_start_date: string | null;
+  reservation_end_date: string | null;
+  picked_up_at: string | null;
+  returned_at: string | null;
   fulfilled_at: string | null;
   cancelled_at: string | null;
   books: ReservationBook | ReservationBook[] | null;
@@ -89,11 +104,11 @@ function getToneClasses(seed: string) {
 }
 
 function mapReservationStatusToBookStatus(status: LibraryReservationStatus): BookStatus {
-  if (status === "pending") return "pending";
-  if (status === "approved" || status === "ready_for_pickup") return "approved";
+  if (status === "pending" || status === "approved" || status === "ready_for_pickup" || status === "reserved" || status === "queued") return "approved";
   if (status === "cancelled") return "cancelled";
   if (status === "expired") return "overdue";
   if (status === "overdue") return "overdue";
+  if (status === "picked_up") return "picked_up";
   if (status === "returned") return "returned";
   return "returned";
 }
@@ -107,29 +122,23 @@ function normalizeReservationRecord(record: ReservationRecord): LibraryBookItem 
     bookId: linkedBook.id,
     title: linkedBook.title,
     coverImageUrl: linkedBook.cover_image_url,
-    borrowDate: record.requested_at,
+    borrowDate: record.reservation_start_date ?? record.picked_up_at ?? record.requested_at,
     returnDate:
-      status === "pending" || status === "approved"
-        ? record.expires_at
+      status === "approved"
+        ? record.reservation_end_date ?? record.expires_at
         : status === "cancelled"
         ? record.cancelled_at
+        : status === "picked_up"
+        ? record.reservation_end_date ?? record.expires_at
         : status === "returned"
-        ? record.fulfilled_at
-        : record.expires_at,
+        ? record.returned_at ?? record.fulfilled_at
+        : record.reservation_end_date ?? record.expires_at,
     status
   };
 }
 
 function StatusIcon({ status }: { status: BookStatus }) {
   const shared = "h-5 w-5";
-  if (status === "pending") {
-    return (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={shared}>
-        <circle cx="12" cy="12" r="8" />
-        <path d="M12 8v4l2.5 2.5" />
-      </svg>
-    );
-  }
   if (status === "approved") {
     return (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={shared}>
@@ -164,7 +173,6 @@ function StatusIcon({ status }: { status: BookStatus }) {
 }
 
 function getStatusColors(status: BookStatus) {
-  if (status === "pending") return "border-slate-200 bg-slate-50 text-slate-600";
   if (status === "approved") return "border-emerald-200 bg-emerald-50 text-emerald-700";
   if (status === "cancelled") return "border-amber-200 bg-amber-50 text-amber-700";
   if (status === "returned") return "border-indigo-200 bg-indigo-50 text-indigo-700";
@@ -173,8 +181,7 @@ function getStatusColors(status: BookStatus) {
 }
 
 function getStatusLabel(status: BookStatus) {
-  if (status === "pending") return "Pending";
-  if (status === "approved") return "Approved";
+  if (status === "approved") return "Reserved";
   if (status === "cancelled") return "Cancelled";
   if (status === "picked_up") return "Picked up";
   if (status === "returned") return "Returned";
@@ -291,9 +298,8 @@ export default function DashboardPage() {
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
   const [libraryItems, setLibraryItems] = useState<LibraryBookItem[]>([]);
-  const [activeStatus, setActiveStatus] = useState<BookStatus>("pending");
+  const [activeStatus, setActiveStatus] = useState<BookStatus>("approved");
   const [expandedSections, setExpandedSections] = useState<Record<BookStatus, boolean>>({
-    pending: false,
     approved: false,
     cancelled: false,
     picked_up: false,
@@ -350,9 +356,9 @@ export default function DashboardPage() {
 
       const reservationsResult = await supabase
         .from("reservations")
-        .select("id,status,requested_at,expires_at,fulfilled_at,cancelled_at,books(id,title,subtitle,cover_image_url)")
+        .select("id,status,requested_at,expires_at,reservation_start_date,reservation_end_date,picked_up_at,returned_at,fulfilled_at,cancelled_at,books(id,title,subtitle,cover_image_url)")
         .eq("user_id", session.user.id)
-        .in("status", ["pending", "approved", "ready_for_pickup", "fulfilled", "cancelled", "expired"])
+        .in("status", ["pending", "approved", "ready_for_pickup", "reserved", "queued", "picked_up", "fulfilled", "returned", "cancelled", "expired"])
         .order("requested_at", { ascending: false });
 
       if (reservationsResult.error) {
@@ -405,7 +411,6 @@ export default function DashboardPage() {
 
   const groupedItems = useMemo(() => {
     return {
-      pending: libraryItems.filter((item) => item.status === "pending"),
       approved: libraryItems.filter((item) => item.status === "approved"),
       cancelled: libraryItems.filter((item) => item.status === "cancelled"),
       picked_up: libraryItems.filter((item) => item.status === "picked_up"),
@@ -470,8 +475,7 @@ export default function DashboardPage() {
       }}
       sidebarStats={[
         { label: "Total Records", value: String(libraryItems.length) },
-        // FIXED: shows actionable pending count instead of repeating the active tab label
-        { label: "Pending", value: String(groupedItems.pending.length) }
+        { label: "Reserved", value: String(groupedItems.approved.length) }
       ]}
       sidebarAction={{
         label: isFetching ? "Refreshing..." : "Refresh Data",
@@ -502,10 +506,10 @@ export default function DashboardPage() {
         <SectionCard
           eyebrow="Institutional View"
           title="Compact transaction history"
-          description="Borrowing history is now grouped into four clean status buckets and tuned for fast review on large screens."
+          description="Borrowing history is grouped into five clean status buckets and tuned for fast review on large screens."
         />
 
-        <section className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <section className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-5">
           {(Object.entries(groupedItems) as Array<[BookStatus, LibraryBookItem[]]>).map(([status, items]) => (
             <article
               key={status}
@@ -524,7 +528,7 @@ export default function DashboardPage() {
 
         <section className="rounded-[1.8rem] border border-slate-200 bg-white/95 p-5 shadow-[0_20px_50px_rgba(15,23,42,0.06)]">
           <div className="flex flex-wrap items-center gap-3">
-            {(["pending", "approved", "picked_up", "cancelled", "returned", "overdue"] as BookStatus[]).map((status) => (
+            {(["approved", "picked_up", "cancelled", "returned", "overdue"] as BookStatus[]).map((status) => (
               <StatusFilterButton
                 key={status}
                 active={activeStatus === status}

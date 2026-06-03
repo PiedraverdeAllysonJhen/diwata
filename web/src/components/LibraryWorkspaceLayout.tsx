@@ -278,9 +278,6 @@ export default function LibraryWorkspaceLayout({
               </div>
             </header>
 
-            {statusBar ? (
-              <section className="discover-meta-row">{statusBar}</section>
-            ) : null}
             {notice}
             <div className="discover-content-stack">{children}</div>
           </section>

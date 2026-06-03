@@ -170,7 +170,7 @@ export default function HelpPage() {
           .from("reservations")
           .select("id", { count: "exact", head: true })
           .eq("user_id", session.user.id)
-          .in("status", ["pending", "approved", "ready_for_pickup"]),
+          .in("status", ["pending", "approved", "ready_for_pickup", "reserved", "queued"]),
         supabase
           .from("bookmarks")
           .select("book_id", { count: "exact", head: true })

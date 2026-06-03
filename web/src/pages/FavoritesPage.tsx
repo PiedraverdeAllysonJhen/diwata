@@ -64,7 +64,13 @@ type FavoriteShelf = {
 
 type ActiveReservation = {
   book_id: string;
-  status: "pending" | "approved" | "ready_for_pickup";
+  status:
+    | "pending"
+    | "approved"
+    | "ready_for_pickup"
+    | "reserved"
+    | "queued"
+    | "picked_up";
 };
 
 type Notice = { type: "success" | "error"; text: string };
@@ -75,6 +81,13 @@ function formatLastSync(value: string | null) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "Waiting for first sync";
   return `Last sync ${date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", second: "2-digit" })}`;
+}
+
+function toDateInputValue(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 // Date-only format for the compact card footer
@@ -362,7 +375,14 @@ export default function FavoritesPage() {
           .from("reservations")
           .select("book_id,status")
           .eq("user_id", session.user.id)
-          .in("status", ["pending", "approved", "ready_for_pickup"]),
+          .in("status", [
+            "pending",
+            "approved",
+            "ready_for_pickup",
+            "reserved",
+            "queued",
+            "picked_up",
+          ]),
       ]);
 
       if (favResult.error) {
@@ -502,22 +522,50 @@ export default function FavoritesPage() {
     if (!session?.user.id) return;
     setActiveReserveBookId(bookId);
     setNotice(null);
-    const { error } = await supabase
-      .from("reservations")
-      .insert({ user_id: session.user.id, book_id: bookId, status: "pending" });
+    const { data, error } = await supabase.rpc("create_student_reservation", {
+      target_book_id: bookId,
+      desired_start: toDateInputValue(new Date()),
+      join_queue_when_full: true,
+    });
     if (error) {
       setNotice({
         type: "error",
         text:
-          error.code === "23505" || /duplicate/i.test(error.message)
+          error.code === "23505" ||
+          /already have|duplicate/i.test(error.message)
             ? "You already have an active reservation for this book."
             : error.message,
       });
       setActiveReserveBookId(null);
       return;
     }
+    const result = Array.isArray(data) ? data[0] : null;
+    const status = String(result?.status ?? "reserved");
+    if (!result?.reservation_id) {
+      setNotice({
+        type: "error",
+        text: "Reservation did not finish. Please run the latest Supabase reservation migration, then try again.",
+      });
+      setActiveReserveBookId(null);
+      return;
+    }
+    if (status === "pending") {
+      setNotice({
+        type: "error",
+        text: "Your database is still using the old pending reservation flow. Run the latest Supabase reservation migration so reservations are saved as reserved and availability is decremented.",
+      });
+      setActiveReserveBookId(null);
+      return;
+    }
     setReservedBookIds((prev) => new Set([...prev, bookId]));
-    setNotice({ type: "success", text: "Reservation created successfully." });
+    await loadFavorites("live");
+    setNotice({
+      type: "success",
+      text:
+        status === "queued"
+          ? "No copies are available today, so you were added to the waitlist."
+          : "Reservation created successfully.",
+    });
     setActiveReserveBookId(null);
   };
 
