@@ -19,9 +19,21 @@ accessibility, minimize waiting time, and modernize the current manual reservati
 ## Release Notes
 
 ## DW.010.004 Release Notes
+- Fixed the student reservation lifecycle so confirmed reservations are saved as active reserved records immediately.
+- Updated reservation availability handling so book counts decrement on successful reservation and stay consistent across catalog cards, category pages, book details, favorites, and reservation modals.
+- Added migration support to reconcile legacy pending reservations, recalculate available copies from active reservations and loans, and prevent duplicate reservations from old pending rows.
+- Removed pending from the visible student/admin reservation status experience while keeping legacy pending rows compatible internally.
+- Added clearer reservation modal error handling for failed RPC calls or outdated database flows.
+- Added a new reservation calendar modal flow and kept reservation actions consistent across Discover, Category, Book Details, and Favorites.
+- Added a New Books section in Discover sorted by `books.created_at`.
+- Improved the My Library status layout so five status cards display cleanly in one row on wide screens.
+- Added bottom-right notification toast popups for new unread alerts with auto-dismiss, click-to-read, and per-toast dismissal behavior.
+- Added notification email delivery support through the Supabase Edge Function and notification email migration.
+- Removed the green synced / last sync pills from the shared student workspace layout.
 - Removed Magic Link authentication from the login experience and kept password-based login, signup, forgot password, and reset password flows.
 - Added a dedicated forgot password page using Supabase password reset email redirects.
 - Added centralized route guards for guest, authenticated, student, and admin routes.
+- Added timeout handling for session, role, and settings checks so auth/settings loading screens do not hang indefinitely.
 - Hardened admin access so non-staff users are redirected before admin pages render.
 - Reduced duplicate admin Supabase fetching by sharing admin data through the admin workspace.
 - Removed database-writing side effects from normal admin data refresh/loading.
@@ -29,6 +41,7 @@ accessibility, minimize waiting time, and modernize the current manual reservati
 - Hardened admin reservation RPCs with staff checks.
 - Disabled unfinished overdue fine action buttons until notification, payment, and waiver workflows are fully implemented.
 - Kept category browsing in the dedicated Category page and removed duplicate category UI from other student pages.
+- Simplified the student dashboard/settings UI by removing interface preference panels, current preference summaries, preference metric cards, repeated header shortcut buttons, and extra intro/explainer cards.
 - Improved mobile navigation with a menu drawer, fixed mobile notification panel layout, and refined responsive category/status controls.
 - Cleaned unused legacy UI code, production comments, and notification read-state handling.
 - Added documentation for BookItStudent email sender setup using `bookitstudent@gmail.com`.
