@@ -1,4 +1,4 @@
-import { ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Session } from "@supabase/supabase-js";
 import { useNavigate } from "react-router-dom";
 import LibraryWorkspaceLayout from "../components/LibraryWorkspaceLayout";
@@ -264,31 +264,6 @@ function LibraryHistoryCard({ item }: { item: LibraryBookItem }) {
   );
 }
 
-function SectionCard({
-  eyebrow,
-  title,
-  description,
-  children
-}: {
-  eyebrow: string;
-  title: string;
-  description: string;
-  children?: ReactNode;
-}) {
-  return (
-    <section className="rounded-[1.8rem] border border-slate-200 bg-white/95 p-5 shadow-[0_20px_50px_rgba(15,23,42,0.06)]">
-      <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
-        <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-emerald-700">{eyebrow}</p>
-          <h2 className="mt-2 text-xl font-semibold tracking-tight text-slate-900">{title}</h2>
-          <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500">{description}</p>
-        </div>
-        {children}
-      </div>
-    </section>
-  );
-}
-
 export default function DashboardPage() {
   const navigate = useNavigate();
   const [session, setSession] = useState<Session | null>(null);
@@ -482,16 +457,6 @@ export default function DashboardPage() {
         onClick: () => { void loadLibraryData("manual"); },
         disabled: isFetching
       }}
-      headerActions={
-        <div className="discover-inline-actions">
-          <button type="button" className="btn btn-soft btn-small" onClick={() => navigate("/search")}>
-            Open Discover
-          </button>
-          <button type="button" className="btn btn-soft btn-small" onClick={() => navigate("/reservations")}>
-            Open Reservations
-          </button>
-        </div>
-      }
       statusBar={
         <PortalLiveIndicator
           isSyncing={isLiveSyncing}
@@ -503,12 +468,6 @@ export default function DashboardPage() {
       onSignOut={handleSignOut}
     >
       <div className="space-y-5">
-        <SectionCard
-          eyebrow="Institutional View"
-          title="Compact transaction history"
-          description="Borrowing history is grouped into five clean status buckets and tuned for fast review on large screens."
-        />
-
         <section className="grid grid-cols-2 gap-4 xl:grid-cols-5">
           {(Object.entries(groupedItems) as Array<[BookStatus, LibraryBookItem[]]>).map(([status, items]) => (
             <article

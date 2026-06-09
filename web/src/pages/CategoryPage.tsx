@@ -1,4 +1,4 @@
-import { ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Session } from "@supabase/supabase-js";
 import { useNavigate } from "react-router-dom";
 import CatalogBookCard from "../components/CatalogBookCard";
@@ -293,37 +293,6 @@ function CategoryIconButton({
       <span className="text-[11px] text-slate-400">{count}</span>
       <span className="sr-only">{name}</span>
     </button>
-  );
-}
-
-function SectionCard({
-  eyebrow,
-  title,
-  description,
-  children,
-}: {
-  eyebrow: string;
-  title: string;
-  description: string;
-  children?: ReactNode;
-}) {
-  return (
-    <section className="rounded-[1.8rem] border border-slate-200 bg-white/95 p-5 shadow-[0_20px_50px_rgba(15,23,42,0.06)]">
-      <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
-        <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-emerald-700">
-            {eyebrow}
-          </p>
-          <h2 className="mt-2 text-xl font-semibold tracking-tight text-slate-900">
-            {title}
-          </h2>
-          <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500">
-            {description}
-          </p>
-        </div>
-        {children}
-      </div>
-    </section>
   );
 }
 
@@ -664,16 +633,6 @@ export default function CategoryPage() {
       onSignOut={handleSignOut}
     >
       <div className="space-y-5">
-        <SectionCard
-          eyebrow="Category Navigation"
-          title="Choose a shelf icon and go straight to the books"
-          description="The category page now behaves like a focused browse studio instead of a text-heavy catalog dump."
-        >
-          <div className="text-xs text-slate-500">
-            {filteredBooks.length} visible titles
-          </div>
-        </SectionCard>
-
         <section className="slider-card rounded-[1.8rem] border border-slate-200 bg-white/95 p-5 shadow-[0_20px_50px_rgba(15,23,42,0.06)]">
           <div className="mobile-slider-rail category-slider-rail" aria-label="Category slider">
             <button

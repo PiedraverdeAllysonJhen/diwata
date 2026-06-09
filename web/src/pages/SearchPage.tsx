@@ -1,6 +1,5 @@
 import {
   FormEvent,
-  ReactNode,
   useCallback,
   useEffect,
   useMemo,
@@ -185,37 +184,6 @@ function formatLastSync(value: string | null) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "Waiting for first sync";
   return `Last sync ${date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", second: "2-digit" })}`;
-}
-
-function SectionCard({
-  eyebrow,
-  title,
-  description,
-  children,
-}: {
-  eyebrow: string;
-  title: string;
-  description: string;
-  children: ReactNode;
-}) {
-  return (
-    <section className="rounded-[1.8rem] border border-slate-200 bg-white/95 p-5 shadow-[0_20px_50px_rgba(15,23,42,0.06)]">
-      <div className="mb-5 flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
-        <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-emerald-700">
-            {eyebrow}
-          </p>
-          <h2 className="mt-2 text-xl font-semibold tracking-tight text-slate-900">
-            {title}
-          </h2>
-          <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500">
-            {description}
-          </p>
-        </div>
-        {children}
-      </div>
-    </section>
-  );
 }
 
 export default function SearchPage() {
@@ -501,13 +469,6 @@ export default function SearchPage() {
     setSearchQuery(searchInput.trim());
   };
 
-  const handleClearBrowse = () => {
-    setSearchInput("");
-    setSearchQuery("");
-    setSelectedLanguage("all");
-    setAvailabilityFilter("all");
-  };
-
   const openReservationModal = (book: SearchBook) => {
     setNotice("");
     setReservationBook(book);
@@ -590,25 +551,6 @@ export default function SearchPage() {
       onSignOut={handleSignOut}
     >
       <div className="space-y-5">
-        <SectionCard
-          eyebrow="Library Search"
-          title="Browse the collection with less clutter"
-          description="Search, language, and availability filters move you straight into a focused browsing grid."
-        >
-          <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500">
-            <span>{filteredBooks.length} matching titles</span>
-            {isFocusedBrowse ? (
-              <button
-                type="button"
-                onClick={handleClearBrowse}
-                className="rounded-full border border-slate-200 px-3 py-1.5 font-semibold text-slate-700 transition hover:border-emerald-200 hover:text-emerald-700"
-              >
-                Clear focus
-              </button>
-            ) : null}
-          </div>
-        </SectionCard>
-
         <section className="rounded-[1.8rem] border border-slate-200 bg-white/95 p-5 shadow-[0_20px_50px_rgba(15,23,42,0.06)]">
           <form
             className="grid items-end gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,0.9fr)_minmax(0,0.9fr)_auto]"
