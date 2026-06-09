@@ -509,7 +509,7 @@ export default function DashboardPage() {
           description="Borrowing history is grouped into five clean status buckets and tuned for fast review on large screens."
         />
 
-        <section className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-5">
+        <section className="grid grid-cols-2 gap-4 xl:grid-cols-5">
           {(Object.entries(groupedItems) as Array<[BookStatus, LibraryBookItem[]]>).map(([status, items]) => (
             <article
               key={status}
@@ -526,8 +526,8 @@ export default function DashboardPage() {
           ))}
         </section>
 
-        <section className="rounded-[1.8rem] border border-slate-200 bg-white/95 p-5 shadow-[0_20px_50px_rgba(15,23,42,0.06)]">
-          <div className="flex flex-wrap items-center gap-3">
+        <section className="slider-card rounded-[1.8rem] border border-slate-200 bg-white/95 p-5 shadow-[0_20px_50px_rgba(15,23,42,0.06)]">
+          <div className="mobile-slider-rail status-slider-rail" aria-label="Library status slider">
             {(["approved", "picked_up", "cancelled", "returned", "overdue"] as BookStatus[]).map((status) => (
               <StatusFilterButton
                 key={status}
@@ -552,7 +552,6 @@ export default function DashboardPage() {
             <p className="text-sm font-medium text-slate-500">{activeItems.length} records</p>
           </div>
 
-          {/* ADDED: skeleton when first loading — only shown before any data arrives */}
           {isFetching && libraryItems.length === 0 ? (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
               {Array.from({ length: 6 }, (_, i) => (

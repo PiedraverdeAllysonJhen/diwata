@@ -1,4 +1,4 @@
-import { ReactNode } from "react";
+import { ReactNode, useState } from "react";
 import ReservationNotifier from "./ReservationNotifier";
 import { ReservationNotification } from "../hooks/useReservationNotifier";
 
@@ -148,12 +148,47 @@ export default function LibraryWorkspaceLayout({
   const currentMenu = activeMenuKey ?? ROUTE_MENU_KEY_MAP[activeRoute];
   const primaryMenu = audience === "admin" ? ADMIN_PRIMARY_MENU : STUDENT_PRIMARY_MENU;
   const secondaryMenu = audience === "admin" ? ADMIN_SECONDARY_MENU : STUDENT_SECONDARY_MENU;
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+  const navigateAndClose = (route: WorkspaceRoute) => {
+    setIsMobileMenuOpen(false);
+    onNavigate(route);
+  };
+
+  const signOutAndClose = () => {
+    setIsMobileMenuOpen(false);
+    void onSignOut();
+  };
 
   return (
     <main className="portal-page discover-page discover-exact">
       <div className="discover-app-card">
+        <button
+          type="button"
+          className="workspace-menu-toggle"
+          aria-expanded={isMobileMenuOpen}
+          aria-controls="workspace-sidebar"
+          onClick={() => setIsMobileMenuOpen((value) => !value)}
+        >
+          <span aria-hidden="true" />
+          <span>Menu</span>
+        </button>
+
+        {isMobileMenuOpen ? (
+          <button
+            type="button"
+            className="workspace-menu-backdrop"
+            aria-label="Close menu"
+            onClick={() => setIsMobileMenuOpen(false)}
+          />
+        ) : null}
+
         <div className="discover-shell">
-          <aside className="discover-sidebar" aria-label="Primary navigation">
+          <aside
+            id="workspace-sidebar"
+            className={`discover-sidebar ${isMobileMenuOpen ? "mobile-open" : ""}`.trim()}
+            aria-label="Primary navigation"
+          >
             <div className="discover-sidebar-brand">
               <img
                 src="/assets/bookitstudent-logo.jpg"
@@ -176,7 +211,7 @@ export default function LibraryWorkspaceLayout({
                       type="button"
                       className={`discover-menu-item ${active ? "active" : ""}`.trim()}
                       aria-current={active ? "page" : undefined}
-                      onClick={() => onNavigate(item.route)}
+                      onClick={() => navigateAndClose(item.route)}
                     >
                       <span className="discover-menu-dot" aria-hidden="true" />
                       <span>{item.label}</span>
@@ -200,7 +235,7 @@ export default function LibraryWorkspaceLayout({
                     type="button"
                     className={`discover-menu-item ${active ? "active" : "discover-menu-passive"}`.trim()}
                     aria-current={active ? "page" : undefined}
-                    onClick={() => onNavigate(item.route)}
+                    onClick={() => navigateAndClose(item.route)}
                   >
                     <span className="discover-menu-dot" aria-hidden="true" />
                     <span>{item.label}</span>
@@ -210,9 +245,7 @@ export default function LibraryWorkspaceLayout({
               <button
                 type="button"
                 className="discover-menu-item"
-                onClick={() => {
-                  void onSignOut();
-                }}
+                onClick={signOutAndClose}
               >
                 <span className="discover-menu-dot" aria-hidden="true" />
                 <span>Log out</span>
@@ -234,7 +267,10 @@ export default function LibraryWorkspaceLayout({
                   type="button"
                   className="discover-side-action"
                   disabled={sidebarAction.disabled}
-                  onClick={sidebarAction.onClick}
+                  onClick={() => {
+                    setIsMobileMenuOpen(false);
+                    sidebarAction.onClick();
+                  }}
                 >
                   {sidebarAction.label}
                 </button>

@@ -315,15 +315,9 @@ export default function ReservationsPage() {
     setActiveAction(`cancel-${reservationId}`);
     setNotice(null);
 
-    const { error } = await supabase
-      .from("reservations")
-      .update({
-        status: "cancelled",
-        cancelled_at: new Date().toISOString()
-      })
-      .eq("id", reservationId)
-      .eq("user_id", session.user.id)
-      .in("status", cancellableReservationStatuses);
+    const { data, error } = await supabase.rpc("cancel_own_reservation", {
+      target_reservation_id: reservationId,
+    });
 
     if (error) {
       setNotice({
@@ -334,9 +328,19 @@ export default function ReservationsPage() {
       return;
     }
 
+    const result = Array.isArray(data) ? data[0] : null;
+    if (result && result.was_cancelled === false) {
+      setNotice({
+        type: "error",
+        text: result.message ?? "Reservation cannot be cancelled.",
+      });
+      setActiveAction(null);
+      return;
+    }
+
     setNotice({
       type: "success",
-      text: "Reservation cancelled successfully."
+      text: result?.message ?? "Reservation cancelled successfully."
     });
     await loadReservationData("live");
     setActiveAction(null);

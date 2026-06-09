@@ -1,6 +1,8 @@
 import {
   FormEvent,
   ReactNode,
+  createContext,
+  useContext,
   useCallback,
   useEffect,
   useMemo,
@@ -12,7 +14,7 @@ import LibraryWorkspaceLayout, {
   WorkspaceRoute,
 } from "../components/LibraryWorkspaceLayout";
 import { useReservationNotifier } from "../hooks/useReservationNotifier";
-import { getUserRole, isStaffUser } from "../lib/authRouting";
+import { isStaffUser } from "../lib/authRouting";
 import { hasSupabaseEnv, supabase } from "../lib/supabase";
 
 type TransactionStatus =
@@ -161,6 +163,8 @@ type AdminConfig = {
   fineRatePesos: number;
   pickupWindowHours: number;
 };
+
+const AdminDataContext = createContext<AdminData | null>(null);
 
 const defaultAdminConfig: AdminConfig = {
   loanDurationDays: 7,
@@ -505,40 +509,6 @@ function useAdminData(): AdminData {
 
     const reservationRows = (reservationsResult.data ?? []) as Record<string, unknown>[];
     const loanRows = (loansResult.data ?? []) as Record<string, unknown>[];
-    for (const loan of loanRows) {
-      const dueDate = loan.due_at ? new Date(String(loan.due_at)) : null;
-      const isPastDue = dueDate && dueDate.getTime() < now.getTime();
-      if (!isPastDue || loan.status === "returned") continue;
-      const lastNotice = loan.last_overdue_notice_at ? new Date(String(loan.last_overdue_notice_at)) : null;
-      const shouldNotify = !lastNotice || now.getTime() - lastNotice.getTime() >= 86400000;
-      if (loan.status !== "overdue") {
-        void supabase.from("loans").update({ status: "overdue" }).eq("id", loan.id).in("status", ["active", "picked_up"]);
-      }
-      if (shouldNotify) {
-        const pickedUpAt = String(loan.picked_up_at ?? loan.checked_out_at ?? "");
-        const days = Math.max(1, Math.ceil((now.getTime() - dueDate.getTime()) / 86400000));
-        const fine = days * config.fineRatePesos;
-        const overdueMessage = `${getCopyBookTitle(loan.book_copies)} is overdue. Borrowed: ${formatDate(pickedUpAt)}. Expected return: ${formatDate(String(loan.due_at))}. Days overdue: ${days}. Total accrued fines: ${formatMoney(fine)}.`;
-        void supabase.from("notifications").insert({
-          user_id: String(loan.user_id),
-          type: "loan_overdue",
-          title: "Overdue library loan",
-          message: overdueMessage,
-          action_url: "/reservations",
-          metadata: { channel: "in_app", days_overdue: days, fine_amount: fine },
-        });
-        void supabase.from("notifications").insert({
-          user_id: String(loan.user_id),
-          type: "loan_overdue_email",
-          title: `Email queued: overdue notice #${days}`,
-          message: overdueMessage,
-          action_url: "/reservations",
-          metadata: { channel: "email", days_overdue: days, fine_amount: fine },
-        });
-        void supabase.from("loans").update({ last_overdue_notice_at: now.toISOString(), fine_amount: fine }).eq("id", loan.id);
-      }
-    }
-
     const reservationTransactions: Transaction[] = reservationRows.map((reservation) => {
       const profile = profileById.get(String(reservation.user_id));
       const occurredAt = String(reservation.returned_at ?? reservation.picked_up_at ?? reservation.cancelled_at ?? reservation.fulfilled_at ?? reservation.approved_at ?? reservation.requested_at ?? "");
@@ -658,15 +628,6 @@ function useAdminData(): AdminData {
       const metadata = (profile.metadata && typeof profile.metadata === "object" ? profile.metadata : {}) as Record<string, unknown>;
       const restrictedUntil = typeof metadata.restricted_until === "string" ? new Date(metadata.restricted_until) : null;
       const restrictionExpired = restrictedUntil ? restrictedUntil.getTime() <= now.getTime() : false;
-      if (accountStatus === "suspended" && restrictionExpired) {
-        void supabase
-          .from("user_profiles")
-          .update({
-            account_status: "active",
-            metadata: { ...metadata, restriction_reason: null, restricted_until: null },
-          })
-          .eq("id", profile.id);
-      }
       const penaltyAmount = penaltiesByUser.get(String(profile.id)) ?? 0;
       return {
         id: String(profile.id),
@@ -927,6 +888,14 @@ function useAdminData(): AdminData {
   };
 }
 
+function useAdminDataContext(): AdminData {
+  const adminData = useContext(AdminDataContext);
+  if (!adminData) {
+    throw new Error("Admin data context is not available.");
+  }
+  return adminData;
+}
+
 function AdminShell({
   activeRoute,
   title,
@@ -944,28 +913,10 @@ function AdminShell({
   const [session, setSession] = useState<Session | null>(null);
   const [isBootstrapping, setIsBootstrapping] = useState(true);
   const [authNotice, setAuthNotice] = useState("");
+  const adminData = useAdminData();
 
   useEffect(() => {
     let isMounted = true;
-    let roleCheckTimer: ReturnType<typeof window.setTimeout> | undefined;
-
-    const verifyStaffAccess = (nextSession: Session) => {
-      if (roleCheckTimer) window.clearTimeout(roleCheckTimer);
-      roleCheckTimer = window.setTimeout(() => {
-        void (async () => {
-          const role = await getUserRole(nextSession.user.id);
-          const allowed = await isStaffUser(nextSession.user.id);
-          if (!isMounted) return;
-          if (!allowed && role === "student") {
-            navigate("/dashboard", { replace: true });
-            return;
-          }
-          if (!allowed) {
-            setAuthNotice("Admin access verification is still syncing. Staying in the admin workspace.");
-          }
-        })();
-      }, 0);
-    };
 
     const bootstrap = async () => {
       if (!hasSupabaseEnv) {
@@ -982,40 +933,69 @@ function AdminShell({
         return;
       }
 
+      const allowed = await isStaffUser(currentSession.user.id);
+      if (!isMounted) return;
+
+      if (!allowed) {
+        setIsBootstrapping(false);
+        navigate("/dashboard", { replace: true });
+        return;
+      }
+
       setSession(currentSession);
       setIsBootstrapping(false);
-      verifyStaffAccess(currentSession);
     };
 
     void bootstrap();
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, nextSession) => {
-      if (!nextSession) {
-        setSession(null);
+      void (async () => {
+        if (!nextSession) {
+          setSession(null);
+          setIsBootstrapping(false);
+          navigate("/", { replace: true });
+          return;
+        }
+        setIsBootstrapping(true);
+        const allowed = await isStaffUser(nextSession.user.id);
+        if (!isMounted) return;
+        if (!allowed) {
+          setSession(null);
+          setIsBootstrapping(false);
+          navigate("/dashboard", { replace: true });
+          return;
+        }
+        setSession(nextSession);
+        setAuthNotice("");
         setIsBootstrapping(false);
-        navigate("/", { replace: true });
-        return;
-      }
-      setSession(nextSession);
-      setIsBootstrapping(false);
-      verifyStaffAccess(nextSession);
+      })();
     });
 
     return () => {
       isMounted = false;
-      if (roleCheckTimer) window.clearTimeout(roleCheckTimer);
       subscription.unsubscribe();
     };
   }, [navigate]);
 
   const notifier = useReservationNotifier(session?.user.id);
-  const sidebarData = useAdminData();
 
   if (!hasSupabaseEnv || isBootstrapping) {
     return (
       <main className="portal-page">
         <section className="portal-shell portal-single">
           <article className="portal-panel">
-            <h1>{!hasSupabaseEnv ? "Supabase not configured" : "Loading admin workspace..."}</h1>
+            <h1>{!hasSupabaseEnv ? "Supabase not configured" : "Verifying admin access..."}</h1>
+          </article>
+        </section>
+      </main>
+    );
+  }
+
+  if (!session) {
+    return (
+      <main className="portal-page">
+        <section className="portal-shell portal-single">
+          <article className="portal-panel">
+            <h1>Redirecting...</h1>
           </article>
         </section>
       </main>
@@ -1023,44 +1003,46 @@ function AdminShell({
   }
 
   return (
-    <LibraryWorkspaceLayout
-      activeRoute={activeRoute}
-      audience="admin"
-      title={title}
-      description={description}
-      notice={authNotice ? <p className="status error portal-notice">{authNotice}</p> : undefined}
-      userEmail={session?.user.email ?? "admin@vsu.edu.ph"}
-      notifier={{
-        notifications: notifier.notifications,
-        unreadCount: notifier.unreadCount,
-        isOpen: notifier.isOpen,
-        onToggle: notifier.toggleOpen,
-        onClose: notifier.close,
-        onMarkRead: notifier.markAsRead,
-        onMarkAllRead: notifier.markAllAsRead,
-      }}
-      sidebarStats={[
-        { label: "Pickup Queue", value: String(sidebarData.metrics.pickupQueueCount) },
-        { label: "Overdue", value: String(sidebarData.metrics.overdueBooks) },
-      ]}
-      sidebarAction={{
-        label: "Export Report",
-        onClick: () => navigate("/admin-reports"),
-      }}
-      headerActions={headerActions}
-      onNavigate={(route) => navigate(`/${route}`)}
-      onSignOut={async () => {
-        await supabase.auth.signOut();
-        navigate("/", { replace: true });
-      }}
-    >
-      <div className="space-y-5">{children}</div>
-    </LibraryWorkspaceLayout>
+    <AdminDataContext.Provider value={adminData}>
+      <LibraryWorkspaceLayout
+        activeRoute={activeRoute}
+        audience="admin"
+        title={title}
+        description={description}
+        notice={authNotice ? <p className="status error portal-notice">{authNotice}</p> : undefined}
+        userEmail={session.user.email ?? "admin@vsu.edu.ph"}
+        notifier={{
+          notifications: notifier.notifications,
+          unreadCount: notifier.unreadCount,
+          isOpen: notifier.isOpen,
+          onToggle: notifier.toggleOpen,
+          onClose: notifier.close,
+          onMarkRead: notifier.markAsRead,
+          onMarkAllRead: notifier.markAllAsRead,
+        }}
+        sidebarStats={[
+          { label: "Pickup Queue", value: String(adminData.metrics.pickupQueueCount) },
+          { label: "Overdue", value: String(adminData.metrics.overdueBooks) },
+        ]}
+        sidebarAction={{
+          label: "Open Reports",
+          onClick: () => navigate("/admin-reports"),
+        }}
+        headerActions={headerActions}
+        onNavigate={(route) => navigate(`/${route}`)}
+        onSignOut={async () => {
+          await supabase.auth.signOut();
+          navigate("/", { replace: true });
+        }}
+      >
+        <div className="space-y-5">{children}</div>
+      </LibraryWorkspaceLayout>
+    </AdminDataContext.Provider>
   );
 }
 
 function AdminDashboard() {
-  const adminData = useAdminData();
+  const adminData = useAdminDataContext();
   const [statusFilter, setStatusFilter] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -1160,8 +1142,8 @@ function AdminTransactionTable({
               <td className="px-4 py-3.5 text-xs font-semibold text-slate-600">{formatMoney(tx.fineAmount ?? 0)}</td>
               <td className="px-4 py-3.5">
                 <div className="flex flex-wrap items-center gap-1.5">
-                  <button className="cursor-pointer rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-600 transition hover:border-emerald-300 hover:text-emerald-700" onClick={() => onView?.(tx)}>View</button>
-                  {tx.type === "Loan" && ["picked_up", "overdue"].includes(tx.status) ? <button className="admin-action-button rounded-lg bg-sky-700 px-2.5 py-1 text-xs font-semibold text-white" onClick={() => onProcessReturn?.(tx)}>Process Return</button> : null}
+                  <button type="button" className="cursor-pointer rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-600 transition hover:border-emerald-300 hover:text-emerald-700" onClick={() => onView?.(tx)}>View</button>
+                  {tx.type === "Loan" && ["picked_up", "overdue"].includes(tx.status) ? <button type="button" className="admin-action-button rounded-lg bg-sky-700 px-2.5 py-1 text-xs font-semibold text-white" onClick={() => onProcessReturn?.(tx)}>Process Return</button> : null}
                 </div>
               </td>
             </tr>
@@ -1173,7 +1155,7 @@ function AdminTransactionTable({
 }
 
 function AdminInventory() {
-  const adminData = useAdminData();
+  const adminData = useAdminDataContext();
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
   const [editingBook, setEditingBook] = useState<CatalogBook | null>(null);
@@ -1211,7 +1193,7 @@ function AdminInventory() {
               <option value="all">All Status</option>
               {Object.keys(BOOK_STATUS_CLASSES).map((item) => <option key={item} value={item}>{item}</option>)}
             </select>
-            <button className="rounded-xl bg-emerald-700 px-4 py-2 text-sm font-semibold text-white" onClick={() => openForm()}>Add Book</button>
+            <button type="button" className="rounded-xl bg-emerald-700 px-4 py-2 text-sm font-semibold text-white" onClick={() => openForm()}>Add Book</button>
           </div>
         </div>
         <div className="mt-5 overflow-x-auto">
@@ -1234,8 +1216,8 @@ function AdminInventory() {
                   <td className="px-4 py-3.5 text-sm font-semibold text-slate-700">{book.copies}</td>
                   <td className="px-4 py-3.5">
                     <div className="flex gap-1.5">
-                      <button className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-semibold text-slate-600" onClick={() => openForm(book)}>Edit</button>
-                      <button className="rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-700" onClick={() => setDeleteTarget(book)}>Delete</button>
+                      <button type="button" className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-semibold text-slate-600" onClick={() => openForm(book)}>Edit</button>
+                      <button type="button" className="rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-700" onClick={() => setDeleteTarget(book)}>Delete</button>
                     </div>
                   </td>
                 </tr>
@@ -1323,7 +1305,7 @@ function BookForm({ book, onCancel, onSave }: { book: CatalogBook | null; onCanc
         </div>
         <div className="mt-5 flex justify-end gap-2">
           <button type="button" className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600" onClick={onCancel}>Cancel</button>
-          <button className="rounded-xl bg-emerald-700 px-4 py-2 text-sm font-semibold text-white">Save Book</button>
+          <button type="submit" className="rounded-xl bg-emerald-700 px-4 py-2 text-sm font-semibold text-white">Save Book</button>
         </div>
       </form>
     </div>
@@ -1343,8 +1325,8 @@ function DeleteBookModal({ book, onCancel, onConfirm }: { book: CatalogBook; onC
           <p className="mt-1"><strong className="text-slate-900">Available Copies:</strong> {book.availableCopies}</p>
         </div>
         <div className="mt-5 flex justify-end gap-2">
-          <button className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600" onClick={onCancel}>Cancel</button>
-          <button className="rounded-xl bg-rose-700 px-4 py-2 text-sm font-semibold text-white" onClick={onConfirm}>Delete Book</button>
+          <button type="button" className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600" onClick={onCancel}>Cancel</button>
+          <button type="button" className="rounded-xl bg-rose-700 px-4 py-2 text-sm font-semibold text-white" onClick={onConfirm}>Delete Book</button>
         </div>
       </section>
     </div>
@@ -1352,7 +1334,7 @@ function DeleteBookModal({ book, onCancel, onConfirm }: { book: CatalogBook; onC
 }
 
 function AdminCirculation() {
-  const adminData = useAdminData();
+  const adminData = useAdminDataContext();
   const [config] = useState(getStoredAdminConfig);
   const [query, setQuery] = useState("");
   const [returnQuery, setReturnQuery] = useState("");
@@ -1399,7 +1381,7 @@ function AdminCirculation() {
                   >
                     Picked Up
                   </button>
-                  <button className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-700" onClick={() => { void adminData.cancelReservation(item, "manual"); }}>Cancel Reservation</button>
+                  <button type="button" className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-700" onClick={() => { void adminData.cancelReservation(item, "manual"); }}>Cancel Reservation</button>
                 </div>
               </div>
             </article>
@@ -1412,7 +1394,7 @@ function AdminCirculation() {
         <h2 className="mt-1.5 text-xl font-semibold tracking-tight text-slate-900">Reserved to borrowed to available</h2>
         <div className="mt-4 grid gap-3 md:grid-cols-[1fr_auto]">
           <input className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-sm outline-none focus:border-emerald-600" placeholder="Enter transaction ID, barcode, student, or book title" value={returnQuery} onChange={(event) => setReturnQuery(event.target.value)} />
-          <button className="cursor-pointer rounded-xl bg-sky-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-800 disabled:cursor-not-allowed disabled:opacity-50" disabled={!returnQuery.trim()} onClick={runManualReturn}>Process Return</button>
+          <button type="button" className="cursor-pointer rounded-xl bg-sky-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-800 disabled:cursor-not-allowed disabled:opacity-50" disabled={!returnQuery.trim()} onClick={runManualReturn}>Process Return</button>
         </div>
         <AdminTransactionTable rows={loanRows} onProcessReturn={(tx) => { void adminData.processReturn(tx); }} onView={setViewTransaction} />
       </Panel>
@@ -1434,14 +1416,14 @@ function TransactionDetailModal({ transaction, onClose }: { transaction: Transac
           <p><strong>Date:</strong> {transaction.date}</p>
           {transaction.dueAt ? <p><strong>Due:</strong> {formatDate(transaction.dueAt)}</p> : null}
         </div>
-        <div className="mt-5 flex justify-end"><button className="rounded-xl bg-emerald-700 px-4 py-2 text-sm font-semibold text-white" onClick={onClose}>Close</button></div>
+        <div className="mt-5 flex justify-end"><button type="button" className="rounded-xl bg-emerald-700 px-4 py-2 text-sm font-semibold text-white" onClick={onClose}>Close</button></div>
       </section>
     </div>
   );
 }
 
 function AdminOverdue() {
-  const adminData = useAdminData();
+  const adminData = useAdminDataContext();
   return (
     <Panel>
       <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-rose-700">Overdue Monitoring</p>
@@ -1450,7 +1432,7 @@ function AdminOverdue() {
       <div className="mt-5 overflow-x-auto">
         <table className="w-full min-w-[820px]">
           <thead><tr className="border-b border-slate-100 bg-slate-50/60">{["Loan ID", "Borrower", "Book", "Due Date", "Days", "Fine", "Status", "Actions"].map((h) => <th key={h} className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">{h}</th>)}</tr></thead>
-          <tbody>{adminData.overdueLoans.map((loan) => <tr key={loan.id} className="border-b border-slate-100"><td className="px-4 py-3.5 font-mono text-xs text-slate-400">{loan.id}</td><td className="px-4 py-3.5 text-sm text-slate-700">{loan.borrower}</td><td className="px-4 py-3.5 text-sm font-semibold text-slate-800">{loan.book}</td><td className="px-4 py-3.5 text-sm text-slate-500">{loan.due}</td><td className="px-4 py-3.5 text-sm font-semibold text-rose-700">{loan.days}</td><td className="px-4 py-3.5 text-sm text-slate-700">{loan.fine}</td><td className="px-4 py-3.5"><Badge classes={loan.status === "Unpaid" ? "border-rose-200 bg-rose-50 text-rose-700" : "border-slate-200 bg-slate-50 text-slate-500"}>{loan.status}</Badge></td><td className="px-4 py-3.5"><div className="flex gap-1.5"><button className="rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-700">Notify</button><button className="rounded-lg bg-emerald-700 px-2.5 py-1 text-xs font-semibold text-white">Paid</button><button className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-semibold text-slate-600">Waive</button></div></td></tr>)}</tbody>
+          <tbody>{adminData.overdueLoans.map((loan) => <tr key={loan.id} className="border-b border-slate-100"><td className="px-4 py-3.5 font-mono text-xs text-slate-400">{loan.id}</td><td className="px-4 py-3.5 text-sm text-slate-700">{loan.borrower}</td><td className="px-4 py-3.5 text-sm font-semibold text-slate-800">{loan.book}</td><td className="px-4 py-3.5 text-sm text-slate-500">{loan.due}</td><td className="px-4 py-3.5 text-sm font-semibold text-rose-700">{loan.days}</td><td className="px-4 py-3.5 text-sm text-slate-700">{loan.fine}</td><td className="px-4 py-3.5"><Badge classes={loan.status === "Unpaid" ? "border-rose-200 bg-rose-50 text-rose-700" : "border-slate-200 bg-slate-50 text-slate-500"}>{loan.status}</Badge></td><td className="px-4 py-3.5"><div className="flex gap-1.5"><button type="button" className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-400" disabled title="Overdue notifications require scheduled email automation">Notify</button><button type="button" className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-400" disabled title="Fine payment tracking is reserved for a future payment workflow">Paid</button><button type="button" className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-400" disabled title="Fine waivers are reserved for a future approval workflow">Waive</button></div></td></tr>)}</tbody>
         </table>
         {!adminData.isLoading && adminData.overdueLoans.length === 0 ? <p className="px-4 py-8 text-center text-sm text-slate-400">No overdue loans are currently recorded in the database.</p> : null}
       </div>
@@ -1459,7 +1441,7 @@ function AdminOverdue() {
 }
 
 function AdminUsers() {
-  const adminData = useAdminData();
+  const adminData = useAdminDataContext();
   const [historyUser, setHistoryUser] = useState<AdminUser | null>(null);
   const [restrictUser, setRestrictUser] = useState<AdminUser | null>(null);
   const [history, setHistory] = useState<UserHistoryEntry[]>([]);
@@ -1553,7 +1535,7 @@ function AdminUsers() {
         <div className="mt-5 overflow-x-auto">
           <table className="w-full min-w-[860px]">
             <thead><tr className="border-b border-slate-100 bg-slate-50/60">{["Name", "Email", "Role", "Active Loans", "Penalties", "Status", "Actions"].map((h) => <th key={h} className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">{h}</th>)}</tr></thead>
-            <tbody>{adminData.users.map((user) => <tr key={user.id} className="border-b border-slate-100"><td className="px-4 py-3.5 text-sm font-semibold text-slate-800">{user.name}</td><td className="px-4 py-3.5 text-sm text-slate-600">{user.email}</td><td className="px-4 py-3.5"><Badge classes={user.role === "librarian" || user.role === "admin" ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-slate-50 text-slate-500"}>{user.role}</Badge></td><td className="px-4 py-3.5 text-sm text-slate-700">{user.loans}</td><td className="px-4 py-3.5 text-sm text-slate-700">{user.penalties}</td><td className="px-4 py-3.5"><Badge classes={user.status === "Active" ? "border-emerald-200 bg-emerald-50 text-emerald-700" : user.status === "Restricted" ? "border-amber-200 bg-amber-50 text-amber-700" : "border-rose-200 bg-rose-50 text-rose-700"}>{user.status}</Badge></td><td className="px-4 py-3.5"><div className="flex gap-1.5"><button className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-semibold text-slate-600" onClick={() => { void openHistory(user); }}>History</button>{user.status === "Suspended" ? <button className="rounded-lg bg-emerald-700 px-2.5 py-1 text-xs font-semibold text-white" onClick={() => { void unrestrictUser(user); }}>Unrestrict</button> : <button className="rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-700" onClick={() => setRestrictUser(user)}>Restrict</button>}</div></td></tr>)}</tbody>
+            <tbody>{adminData.users.map((user) => <tr key={user.id} className="border-b border-slate-100"><td className="px-4 py-3.5 text-sm font-semibold text-slate-800">{user.name}</td><td className="px-4 py-3.5 text-sm text-slate-600">{user.email}</td><td className="px-4 py-3.5"><Badge classes={user.role === "librarian" || user.role === "admin" ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-slate-50 text-slate-500"}>{user.role}</Badge></td><td className="px-4 py-3.5 text-sm text-slate-700">{user.loans}</td><td className="px-4 py-3.5 text-sm text-slate-700">{user.penalties}</td><td className="px-4 py-3.5"><Badge classes={user.status === "Active" ? "border-emerald-200 bg-emerald-50 text-emerald-700" : user.status === "Restricted" ? "border-amber-200 bg-amber-50 text-amber-700" : "border-rose-200 bg-rose-50 text-rose-700"}>{user.status}</Badge></td><td className="px-4 py-3.5"><div className="flex gap-1.5"><button type="button" className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-semibold text-slate-600" onClick={() => { void openHistory(user); }}>History</button>{user.status === "Suspended" ? <button type="button" className="rounded-lg bg-emerald-700 px-2.5 py-1 text-xs font-semibold text-white" onClick={() => { void unrestrictUser(user); }}>Unrestrict</button> : <button type="button" className="rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-700" onClick={() => setRestrictUser(user)}>Restrict</button>}</div></td></tr>)}</tbody>
           </table>
           {!adminData.isLoading && adminData.users.length === 0 ? <p className="px-4 py-8 text-center text-sm text-slate-400">No user profiles are currently readable from the database.</p> : null}
         </div>
@@ -1576,7 +1558,7 @@ function HistoryModal({ user, entries, onClose }: { user: AdminUser; entries: Us
         <div className="mt-4 space-y-3">
           {entries.length > 0 ? entries.map((entry) => <article key={entry.id} className="rounded-xl border border-slate-200 bg-slate-50 p-3"><p className="text-xs text-slate-400">{entry.date}</p><h3 className="text-sm font-semibold text-slate-900">{entry.title}</h3><p className="text-sm text-slate-500">{entry.detail}</p></article>) : <p className="text-sm text-slate-400">No activity found.</p>}
         </div>
-        <div className="mt-5 flex justify-end"><button className="rounded-xl bg-emerald-700 px-4 py-2 text-sm font-semibold text-white" onClick={onClose}>Close</button></div>
+        <div className="mt-5 flex justify-end"><button type="button" className="rounded-xl bg-emerald-700 px-4 py-2 text-sm font-semibold text-white" onClick={onClose}>Close</button></div>
       </section>
     </div>
   );
@@ -1596,7 +1578,7 @@ function RestrictModal({ user, onCancel, onApply }: { user: AdminUser; onCancel:
           <option value="90">3 Months</option>
           <option value="manual">Manual / Indefinite</option>
         </select>
-        <div className="mt-5 flex justify-end gap-2"><button className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600" onClick={onCancel}>Cancel</button><button className="rounded-xl bg-rose-700 px-4 py-2 text-sm font-semibold text-white" onClick={() => { void onApply(user, reason, duration); }}>Apply Restriction</button></div>
+        <div className="mt-5 flex justify-end gap-2"><button type="button" className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600" onClick={onCancel}>Cancel</button><button type="button" className="rounded-xl bg-rose-700 px-4 py-2 text-sm font-semibold text-white" onClick={() => { void onApply(user, reason, duration); }}>Apply Restriction</button></div>
       </section>
     </div>
   );
@@ -1658,7 +1640,7 @@ function BorrowedBarChart({ rows }: { rows: Array<{ title: string; count: number
 }
 
 function AdminReports() {
-  const adminData = useAdminData();
+  const adminData = useAdminDataContext();
   const today = useMemo(() => new Date(), []);
   const sevenDaysAgo = useMemo(() => {
     const date = new Date(today);
@@ -1710,10 +1692,10 @@ function AdminReports() {
         <div className="flex flex-col justify-between gap-4 xl:flex-row xl:items-end">
           <div><p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-emerald-700">Reports / Analytics</p><h2 className="mt-1.5 text-xl font-semibold tracking-tight text-slate-900">Library activity summary</h2></div>
           <div className="flex flex-wrap items-center gap-2">
-            {[7, 15, 30].map((days) => <button key={days} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 transition hover:border-emerald-300 hover:text-emerald-700" onClick={() => setPresetRange(days)}>{days} days</button>)}
+            {[7, 15, 30].map((days) => <button type="button" key={days} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 transition hover:border-emerald-300 hover:text-emerald-700" onClick={() => setPresetRange(days)}>{days} days</button>)}
             <label className="text-xs font-semibold text-slate-500">Start <input type="date" className="ml-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-emerald-600" value={startDate} max={endDate} onChange={(event) => setStartDate(event.target.value)} /></label>
             <label className="text-xs font-semibold text-slate-500">End <input type="date" className="ml-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-emerald-600" value={endDate} min={startDate} onChange={(event) => setEndDate(event.target.value)} /></label>
-            <button className="cursor-pointer rounded-xl bg-emerald-700 px-4 py-2 text-sm font-semibold text-white transition hover:-translate-y-0.5 hover:bg-emerald-800 active:translate-y-0" onClick={() => exportAdminReport(adminData, { startDate, endDate })}>Export Report</button>
+            <button type="button" className="cursor-pointer rounded-xl bg-emerald-700 px-4 py-2 text-sm font-semibold text-white transition hover:-translate-y-0.5 hover:bg-emerald-800 active:translate-y-0" onClick={() => exportAdminReport(adminData, { startDate, endDate })}>Export Report</button>
           </div>
         </div>
         {adminData.notice ? <p className="mt-2 text-xs text-rose-600">{adminData.notice}</p> : null}
@@ -1795,8 +1777,8 @@ export function AdminReportsPage() {
   );
 }
 
-export function AdminSettingsPage() {
-  const adminData = useAdminData();
+function AdminSettings() {
+  const adminData = useAdminDataContext();
   const [config, setConfig] = useState(getStoredAdminConfig);
   const updateConfig = (key: keyof AdminConfig, value: number) => {
     const next = { ...config, [key]: value };
@@ -1807,7 +1789,7 @@ export function AdminSettingsPage() {
     exportAdminReport(adminData);
   };
   return (
-    <AdminShell activeRoute="admin-settings" title="Admin Settings" description="Configure librarian operations, notification preferences, and circulation defaults.">
+    <>
       <Panel>
         <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-emerald-700">Workspace Controls</p>
         <h2 className="mt-1.5 text-xl font-semibold tracking-tight text-slate-900">Library admin preferences</h2>
@@ -1830,8 +1812,16 @@ export function AdminSettingsPage() {
             </article>
           ))}
         </div>
-        <button className="mt-5 rounded-xl bg-emerald-700 px-4 py-2 text-sm font-semibold text-white" onClick={exportReports}>Export Reports</button>
+        <button type="button" className="mt-5 rounded-xl bg-emerald-700 px-4 py-2 text-sm font-semibold text-white" onClick={exportReports}>Export Reports</button>
       </Panel>
+    </>
+  );
+}
+
+export function AdminSettingsPage() {
+  return (
+    <AdminShell activeRoute="admin-settings" title="Admin Settings" description="Configure librarian operations, notification preferences, and circulation defaults.">
+      <AdminSettings />
     </AdminShell>
   );
 }

@@ -103,7 +103,15 @@ export function useReservationNotifier(userId: string | undefined) {
       .limit(MAX_NOTIFICATIONS);
 
     if (error || !data) return;
-    setNotifications((data as NotificationRow[]).map(normalizeNotificationRow));
+    setNotifications((previousItems) => {
+      const localReadIds = new Set(
+        previousItems.filter((item) => item.read).map((item) => item.id),
+      );
+      return (data as NotificationRow[]).map((row) => {
+        const next = normalizeNotificationRow(row);
+        return localReadIds.has(next.id) ? { ...next, read: true } : next;
+      });
+    });
   }, [normalizeNotificationRow, userId]);
 
   useEffect(() => {
@@ -199,10 +207,14 @@ export function useReservationNotifier(userId: string | undefined) {
       previousItems.map((item) => (item.id === id ? { ...item, read: true } : item))
     );
     if (hasSupabaseEnv) {
-      void supabase
-        .from("notifications")
-        .update({ is_read: true, read_at: new Date().toISOString() })
-        .eq("id", id);
+      void (async () => {
+        const { error } = await supabase
+          .from("notifications")
+          .update({ is_read: true, read_at: new Date().toISOString() })
+          .eq("id", id)
+          .eq("user_id", userId ?? "");
+        if (!error) void loadNotifications();
+      })();
     }
   };
 
@@ -211,11 +223,14 @@ export function useReservationNotifier(userId: string | undefined) {
       previousItems.map((item) => (item.read ? item : { ...item, read: true }))
     );
     if (userId && hasSupabaseEnv) {
-      void supabase
-        .from("notifications")
-        .update({ is_read: true, read_at: new Date().toISOString() })
-        .eq("user_id", userId)
-        .eq("is_read", false);
+      void (async () => {
+        const { error } = await supabase
+          .from("notifications")
+          .update({ is_read: true, read_at: new Date().toISOString() })
+          .eq("user_id", userId)
+          .eq("is_read", false);
+        if (!error) void loadNotifications();
+      })();
     }
   };
 

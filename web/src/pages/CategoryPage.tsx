@@ -674,8 +674,8 @@ export default function CategoryPage() {
           </div>
         </SectionCard>
 
-        <section className="rounded-[1.8rem] border border-slate-200 bg-white/95 p-5 shadow-[0_20px_50px_rgba(15,23,42,0.06)]">
-          <div className="flex flex-wrap gap-3">
+        <section className="slider-card rounded-[1.8rem] border border-slate-200 bg-white/95 p-5 shadow-[0_20px_50px_rgba(15,23,42,0.06)]">
+          <div className="mobile-slider-rail category-slider-rail" aria-label="Category slider">
             <button
               type="button"
               onClick={() => setSelectedCategory("all")}
@@ -744,7 +744,6 @@ export default function CategoryPage() {
             ) : null}
           </div>
 
-          {/* ADDED: skeleton when first loading */}
           {isFetching && books.length === 0 ? (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">
               {Array.from({ length: 10 }, (_, i) => (

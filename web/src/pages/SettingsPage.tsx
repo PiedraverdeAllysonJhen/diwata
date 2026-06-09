@@ -166,13 +166,11 @@ export default function SettingsPage() {
   const [settingsForm, setSettingsForm] =
     useState<SettingsForm>(DEFAULT_SETTINGS);
   const [profileForm, setProfileForm] = useState<ProfileForm>(DEFAULT_PROFILE);
-  // ADDED: track the last-saved snapshot so isDirty compares correctly
   const [initialSettings, setInitialSettings] =
     useState<SettingsForm>(DEFAULT_SETTINGS);
   const [initialProfile, setInitialProfile] =
     useState<ProfileForm>(DEFAULT_PROFILE);
 
-  // ADDED: derived dirty state — true whenever the form diverges from the saved snapshot
   const isDirty = useMemo(
     () =>
       JSON.stringify(settingsForm) !== JSON.stringify(initialSettings) ||
@@ -241,7 +239,6 @@ export default function SettingsPage() {
       if (settingsResult.error) {
         setNotice({ type: "error", text: settingsResult.error.message });
       } else {
-        // UPDATED: set both form and initial snapshot so isDirty starts false after load
         const nextSettings: SettingsForm = {
           ...DEFAULT_SETTINGS,
           ...(settingsResult.data ?? {}),
@@ -364,7 +361,6 @@ export default function SettingsPage() {
     }
 
     setNotice({ type: "success", text: "Settings updated successfully." });
-    // ADDED: update snapshots so isDirty resets to false after a successful save
     setInitialSettings({ ...settingsForm });
     setInitialProfile({ ...profileForm });
     setLastSyncedAt(new Date().toISOString());
@@ -550,7 +546,6 @@ export default function SettingsPage() {
               </ul>
             </section>
 
-            {/* UPDATED: left panel is now summary-only — submit button moved to sticky bar in right column */}
             <section className="rounded-[1.8rem] border border-slate-200 bg-white/95 p-5 shadow-[0_20px_50px_rgba(15,23,42,0.06)]">
               <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-emerald-700">
                 Current Preferences
@@ -805,7 +800,6 @@ export default function SettingsPage() {
               </div>
             </SettingsAccordion>
 
-            {/* ADDED: sticky save bar — only visible when form has unsaved changes */}
             {isDirty ? (
               <div className="sticky bottom-4 z-20">
                 <div className="rounded-2xl border border-emerald-200 bg-white/95 p-4 shadow-[0_-4px_24px_rgba(15,23,42,0.14)] flex items-center justify-between gap-4">
