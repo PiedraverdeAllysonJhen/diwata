@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { RealtimePostgresChangesPayload } from "@supabase/supabase-js";
 import { hasSupabaseEnv, supabase } from "../lib/supabase";
 
@@ -21,38 +21,15 @@ type ReservationRow = {
   updated_at?: string | null;
 };
 
-function statusLabel(status: string): string {
-  return status
-    .split("_")
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
-}
-
-function notificationTitle(status: string, eventType: "INSERT" | "UPDATE"): string {
-  if (status === "ready_for_pickup") return "Book ready for pickup";
-  if (status === "fulfilled") return "Reservation completed";
-  if (status === "cancelled") return "Reservation cancelled";
-  if (status === "expired") return "Reservation expired";
-  if (status === "pending" && eventType === "INSERT") return "Reservation submitted";
-  if (status === "pending") return "Reservation updated";
-  return "Reservation status updated";
-}
-
-function notificationMessage(
-  status: string,
-  previousStatus: string | undefined,
-  eventType: "INSERT" | "UPDATE"
-): string {
-  if (eventType === "INSERT") {
-    return `Your reservation is now ${statusLabel(status)}.`;
-  }
-
-  if (previousStatus && previousStatus !== status) {
-    return `Status changed from ${statusLabel(previousStatus)} to ${statusLabel(status)}.`;
-  }
-
-  return `Your reservation status is ${statusLabel(status)}.`;
-}
+type NotificationRow = {
+  id: string;
+  type: string;
+  title: string;
+  message: string;
+  metadata: Record<string, unknown> | null;
+  is_read: boolean;
+  created_at: string;
+};
 
 function getStorageKey(userId: string): string {
   return `bookitstudent.notifications.${userId}`;
@@ -89,24 +66,65 @@ function parseStoredNotifications(raw: string | null): ReservationNotification[]
 export function useReservationNotifier(userId: string | undefined) {
   const [notifications, setNotifications] = useState<ReservationNotification[]>([]);
   const [isOpen, setIsOpen] = useState(false);
-  const statusByReservationRef = useRef<Map<string, string>>(new Map());
 
   const unreadCount = useMemo(
     () => notifications.reduce((count, item) => count + (item.read ? 0 : 1), 0),
     [notifications]
   );
 
+  const normalizeNotificationRow = useCallback(
+    (row: NotificationRow): ReservationNotification => {
+      const reservationId =
+        typeof row.metadata?.reservation_id === "string"
+          ? row.metadata.reservation_id
+          : row.id;
+
+      return {
+        id: row.id,
+        reservationId,
+        status: row.type,
+        title: row.title,
+        message: row.message,
+        createdAt: row.created_at,
+        read: row.is_read
+      };
+    },
+    []
+  );
+
+  const loadNotifications = useCallback(async () => {
+    if (!userId || !hasSupabaseEnv) return;
+
+    const { data, error } = await supabase
+      .from("notifications")
+      .select("id,type,title,message,metadata,is_read,created_at")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+      .limit(MAX_NOTIFICATIONS);
+
+    if (error || !data) return;
+    setNotifications((previousItems) => {
+      const localReadIds = new Set(
+        previousItems.filter((item) => item.read).map((item) => item.id),
+      );
+      return (data as NotificationRow[]).map((row) => {
+        const next = normalizeNotificationRow(row);
+        return localReadIds.has(next.id) ? { ...next, read: true } : next;
+      });
+    });
+  }, [normalizeNotificationRow, userId]);
+
   useEffect(() => {
     if (!userId) {
       setNotifications([]);
       setIsOpen(false);
-      statusByReservationRef.current = new Map();
       return;
     }
 
     const stored = parseStoredNotifications(window.localStorage.getItem(getStorageKey(userId)));
     setNotifications(stored);
-  }, [userId]);
+    void loadNotifications();
+  }, [loadNotifications, userId]);
 
   useEffect(() => {
     if (!userId) return;
@@ -120,85 +138,31 @@ export function useReservationNotifier(userId: string | undefined) {
   useEffect(() => {
     if (!userId || !hasSupabaseEnv) return;
 
-    let isMounted = true;
-
-    const primeCurrentStatuses = async () => {
-      const { data, error } = await supabase
-        .from("reservations")
-        .select("id,status")
-        .eq("user_id", userId)
-        .limit(500);
-
-      if (!isMounted || error || !data) return;
-
-      const nextMap = new Map<string, string>();
-
-      for (const entry of data as ReservationRow[]) {
-        if (entry.id && entry.status) {
-          nextMap.set(entry.id, entry.status);
-        }
-      }
-
-      statusByReservationRef.current = nextMap;
-    };
-
-    void primeCurrentStatuses();
-
-    const enqueueNotification = (
-      reservationId: string,
-      status: string,
-      eventType: "INSERT" | "UPDATE",
-      previousStatus: string | undefined,
-      createdAt?: string | null
+    const handleNotificationChange = (
+      payload: RealtimePostgresChangesPayload<Record<string, unknown>>
     ) => {
-      const eventTimestamp = createdAt ?? new Date().toISOString();
-      const notificationId = `${reservationId}:${status}:${eventTimestamp}:${eventType}`;
+      if (payload.eventType !== "INSERT" && payload.eventType !== "UPDATE") return;
+      const row = payload.new as NotificationRow;
+      if (!row?.id || !row.title || !row.message) return;
 
-      const nextNotification: ReservationNotification = {
-        id: notificationId,
-        reservationId,
-        status,
-        title: notificationTitle(status, eventType),
-        message: notificationMessage(status, previousStatus, eventType),
-        createdAt: eventTimestamp,
-        read: false
-      };
-
+      const nextNotification = normalizeNotificationRow(row);
       setNotifications((previousItems) => {
-        const deduped = previousItems.filter((item) => item.id !== notificationId);
+        const deduped = previousItems.filter((item) => item.id !== nextNotification.id);
         return [nextNotification, ...deduped].slice(0, MAX_NOTIFICATIONS);
       });
     };
 
-    const handleReservationChange = (
+    const handleReservationFallbackChange = (
       payload: RealtimePostgresChangesPayload<Record<string, unknown>>
     ) => {
       const eventType = payload.eventType;
-      if (eventType !== "INSERT" && eventType !== "UPDATE") return;
+      if (eventType !== "UPDATE") return;
 
       const nextRow = payload.new as ReservationRow;
-      const previousRow = payload.old as ReservationRow;
-
       if (!nextRow?.id || typeof nextRow.id !== "string") return;
       if (!nextRow.status || typeof nextRow.status !== "string") return;
 
-      const previousStatus =
-        statusByReservationRef.current.get(nextRow.id) ??
-        (typeof previousRow?.status === "string" ? previousRow.status : undefined);
-
-      const statusChanged = previousStatus !== nextRow.status;
-
-      if (eventType === "INSERT" || statusChanged) {
-        enqueueNotification(
-          nextRow.id,
-          nextRow.status,
-          eventType,
-          previousStatus,
-          nextRow.updated_at ?? nextRow.requested_at
-        );
-      }
-
-      statusByReservationRef.current.set(nextRow.id, nextRow.status);
+      void loadNotifications();
     };
 
     const channel = supabase
@@ -208,18 +172,27 @@ export function useReservationNotifier(userId: string | undefined) {
         {
           event: "*",
           schema: "public",
+          table: "notifications",
+          filter: `user_id=eq.${userId}`
+        },
+        handleNotificationChange
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
           table: "reservations",
           filter: `user_id=eq.${userId}`
         },
-        handleReservationChange
+        handleReservationFallbackChange
       )
       .subscribe();
 
     return () => {
-      isMounted = false;
       void supabase.removeChannel(channel);
     };
-  }, [userId]);
+  }, [loadNotifications, normalizeNotificationRow, userId]);
 
   const toggleOpen = () => {
     setIsOpen((current) => !current);
@@ -233,12 +206,32 @@ export function useReservationNotifier(userId: string | undefined) {
     setNotifications((previousItems) =>
       previousItems.map((item) => (item.id === id ? { ...item, read: true } : item))
     );
+    if (hasSupabaseEnv) {
+      void (async () => {
+        const { error } = await supabase
+          .from("notifications")
+          .update({ is_read: true, read_at: new Date().toISOString() })
+          .eq("id", id)
+          .eq("user_id", userId ?? "");
+        if (!error) void loadNotifications();
+      })();
+    }
   };
 
   const markAllAsRead = () => {
     setNotifications((previousItems) =>
       previousItems.map((item) => (item.read ? item : { ...item, read: true }))
     );
+    if (userId && hasSupabaseEnv) {
+      void (async () => {
+        const { error } = await supabase
+          .from("notifications")
+          .update({ is_read: true, read_at: new Date().toISOString() })
+          .eq("user_id", userId)
+          .eq("is_read", false);
+        if (!error) void loadNotifications();
+      })();
+    }
   };
 
   return {

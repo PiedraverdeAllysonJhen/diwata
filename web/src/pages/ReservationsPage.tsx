@@ -28,7 +28,17 @@ type ReservationBook = {
   book_authors: RawAuthorRelation[] | null;
 };
 
-type ReservationStatus = "pending" | "ready_for_pickup" | "fulfilled";
+type ReservationStatus =
+  | "pending"
+  | "approved"
+  | "ready_for_pickup"
+  | "fulfilled"
+  | "reserved"
+  | "queued"
+  | "picked_up"
+  | "returned"
+  | "cancelled"
+  | "expired";
 
 type ReservationRecord = {
   id: string;
@@ -36,6 +46,11 @@ type ReservationRecord = {
   status: ReservationStatus;
   requested_at: string;
   expires_at: string | null;
+  reservation_start_date: string | null;
+  reservation_end_date: string | null;
+  picked_up_at: string | null;
+  returned_at: string | null;
+  fine_amount: number | null;
   books: ReservationBook | ReservationBook[] | null;
 };
 
@@ -46,8 +61,8 @@ type Notice = {
 
 type LoadSource = "manual" | "live";
 
-const visibleReservationStatuses: ReservationStatus[] = ["pending", "ready_for_pickup", "fulfilled"];
-const cancellableReservationStatuses: ReservationStatus[] = ["pending", "ready_for_pickup"];
+const visibleReservationStatuses: ReservationStatus[] = ["pending", "approved", "ready_for_pickup", "fulfilled", "reserved", "queued", "picked_up", "returned", "cancelled", "expired"];
+const cancellableReservationStatuses: ReservationStatus[] = ["pending", "approved", "ready_for_pickup", "reserved", "queued"];
 
 function formatDate(dateValue: string | null) {
   if (!dateValue) return "No date";
@@ -63,6 +78,7 @@ function formatDate(dateValue: string | null) {
 }
 
 function formatStatus(status: string) {
+  if (status === "pending") return "Reserved";
   return status
     .split("_")
     .map((chunk) => chunk.charAt(0).toUpperCase() + chunk.slice(1))
@@ -185,7 +201,7 @@ export default function ReservationsPage() {
       const reservationsResult = await supabase
         .from("reservations")
         .select(
-          "id,book_id,status,requested_at,expires_at,books(id,isbn,title,subtitle,publisher,language,publication_year,publication_date,cover_image_url,tags,available_copies,total_copies,book_authors(author_id,authors(id,name)))"
+          "id,book_id,status,requested_at,expires_at,reservation_start_date,reservation_end_date,picked_up_at,returned_at,fine_amount,books(id,isbn,title,subtitle,publisher,language,publication_year,publication_date,cover_image_url,tags,available_copies,total_copies,book_authors(author_id,authors(id,name)))"
         )
         .eq("user_id", session.user.id)
         .in("status", visibleReservationStatuses)
@@ -286,9 +302,9 @@ export default function ReservationsPage() {
 
   const reservationMetrics = useMemo(() => {
     const activeReserved = reservations.filter((item) =>
-      item.status === "pending" || item.status === "ready_for_pickup"
+      item.status === "pending" || item.status === "approved" || item.status === "ready_for_pickup" || item.status === "reserved"
     ).length;
-    const borrowed = reservations.filter((item) => item.status === "fulfilled").length;
+    const borrowed = reservations.filter((item) => item.status === "fulfilled" || item.status === "picked_up").length;
 
     return { activeReserved, borrowed };
   }, [reservations]);
@@ -299,15 +315,9 @@ export default function ReservationsPage() {
     setActiveAction(`cancel-${reservationId}`);
     setNotice(null);
 
-    const { error } = await supabase
-      .from("reservations")
-      .update({
-        status: "cancelled",
-        cancelled_at: new Date().toISOString()
-      })
-      .eq("id", reservationId)
-      .eq("user_id", session.user.id)
-      .in("status", cancellableReservationStatuses);
+    const { data, error } = await supabase.rpc("cancel_own_reservation", {
+      target_reservation_id: reservationId,
+    });
 
     if (error) {
       setNotice({
@@ -318,9 +328,19 @@ export default function ReservationsPage() {
       return;
     }
 
+    const result = Array.isArray(data) ? data[0] : null;
+    if (result && result.was_cancelled === false) {
+      setNotice({
+        type: "error",
+        text: result.message ?? "Reservation cannot be cancelled.",
+      });
+      setActiveAction(null);
+      return;
+    }
+
     setNotice({
       type: "success",
-      text: "Reservation cancelled successfully."
+      text: result?.message ?? "Reservation cancelled successfully."
     });
     await loadReservationData("live");
     setActiveAction(null);
@@ -386,20 +406,10 @@ export default function ReservationsPage() {
         },
         disabled: isFetching
       }}
-      headerActions={
-        <div className="discover-inline-actions">
-          <button type="button" className="btn btn-soft btn-small" onClick={() => navigate("/search")}>
-            Open Discover
-          </button>
-          <button type="button" className="btn btn-soft btn-small" onClick={() => navigate("/dashboard")}>
-            Open Dashboard
-          </button>
-        </div>
-      }
       statusBar={
         <PortalLiveIndicator
           isSyncing={isLiveSyncing}
-          text={`${isLiveSyncing ? "Syncing live updates..." : "Live availability active"} | ${formatLastSync(lastSyncedAt)}`}
+          text={`${isLiveSyncing ? "Syncing reservations..." : "Reservation activity synced"} | ${formatLastSync(lastSyncedAt)}`}
         />
       }
       notice={notice ? <p className={`status ${notice.type} portal-notice`}>{notice.text}</p> : undefined}
@@ -448,7 +458,7 @@ export default function ReservationsPage() {
               const isActionLoading = activeAction === `cancel-${reservation.id}`;
               const reservationBook = normalizeReservationBook(reservation.books);
               const authors = normalizeAuthors(reservationBook?.book_authors ?? null);
-              const canCancel = reservation.status === "pending" || reservation.status === "ready_for_pickup";
+              const canCancel = cancellableReservationStatuses.includes(reservation.status);
 
               return (
                 <li
@@ -498,7 +508,11 @@ export default function ReservationsPage() {
                       <p className="reservation-item-meta"><strong>Copies:</strong> {reservationBook?.available_copies ?? 0} available / {reservationBook?.total_copies ?? 0} total</p>
                       <p className="reservation-item-meta"><strong>Tags:</strong> {(reservationBook?.tags ?? []).length > 0 ? (reservationBook?.tags ?? []).join(", ") : "None"}</p>
                       <p className="reservation-item-meta"><strong>Requested:</strong> {formatDate(reservation.requested_at)}</p>
-                      <p className="reservation-item-meta"><strong>Expires:</strong> {reservation.expires_at ? formatDate(reservation.expires_at) : "No expiry"}</p>
+                      <p className="reservation-item-meta"><strong>Start:</strong> {formatDate(reservation.reservation_start_date)}</p>
+                      <p className="reservation-item-meta"><strong>Due:</strong> {formatDate(reservation.reservation_end_date ?? reservation.expires_at)}</p>
+                      <p className="reservation-item-meta"><strong>Picked up:</strong> {formatDate(reservation.picked_up_at)}</p>
+                      <p className="reservation-item-meta"><strong>Returned:</strong> {formatDate(reservation.returned_at)}</p>
+                      <p className="reservation-item-meta"><strong>Fine:</strong> PHP {Number(reservation.fine_amount ?? 0).toFixed(2)}</p>
                     </div>
                   </div>
                   <div className="reservation-item-actions">

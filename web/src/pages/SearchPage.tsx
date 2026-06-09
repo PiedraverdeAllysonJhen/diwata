@@ -1,21 +1,33 @@
-import { FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  FormEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { Session } from "@supabase/supabase-js";
 import { useNavigate } from "react-router-dom";
-import { hasSupabaseEnv, supabase } from "../lib/supabase";
+import CatalogBookCard from "../components/CatalogBookCard";
+import ReservationCalendarModal from "../components/ReservationCalendarModal";
 import PortalLiveIndicator from "../components/PortalLiveIndicator";
 import LibraryWorkspaceLayout from "../components/LibraryWorkspaceLayout";
 import { useReservationNotifier } from "../hooks/useReservationNotifier";
+import { hasSupabaseEnv, supabase } from "../lib/supabase";
 import {
   RawAuthorRelation,
   formatAuthorLine,
   formatPublicationLabel,
   normalizeAuthors,
-  normalizeTags
+  normalizeTags,
 } from "../lib/bookMetadata";
 
 type RawCategoryRelation = {
   category_id: string;
-  categories: { id: string; name: string } | { id: string; name: string }[] | null;
+  categories:
+    | { id: string; name: string }
+    | { id: string; name: string }[]
+    | null;
 };
 
 type RawCopyStatusRelation = {
@@ -35,6 +47,7 @@ type RawBookRecord = {
   cover_image_url: string | null;
   available_copies: number;
   total_copies: number;
+  created_at: string;
   tags: string[] | null;
   book_copies: RawCopyStatusRelation[] | null;
   book_categories: RawCategoryRelation[] | null;
@@ -54,62 +67,68 @@ type SearchBook = {
   coverImageUrl: string | null;
   availableCopies: number;
   totalCopies: number;
+  createdAt: string;
   tags: string[];
   copyStatuses: string[];
   categories: string[];
   authors: string[];
 };
 
-type CategoryRow = {
-  id: string;
-  name: string;
+type ReservationHistoryRow = {
+  book_id: string;
+  status:
+    | "pending"
+    | "approved"
+    | "ready_for_pickup"
+    | "reserved"
+    | "queued"
+    | "picked_up"
+    | "fulfilled"
+    | "returned"
+    | "expired";
 };
 
 type FilterAvailability = "all" | "available" | "borrowed" | "reserved";
 type LoadSource = "manual" | "live";
 type AvailabilityState = Exclude<FilterAvailability, "all">;
 
-type CategoryCount = {
-  id: string;
-  name: string;
-  count: number;
-};
+const CATALOG_PAGE_SIZE = 32;
+const BOOK_SELECT =
+  "id,isbn,title,subtitle,description,publisher,language,publication_year,publication_date,cover_image_url,available_copies,total_copies,created_at,tags,book_copies(status),book_categories(category_id,categories(id,name)),book_authors(author_id,authors(id,name))";
 
-function normalizeCategories(relations: RawCategoryRelation[] | null): string[] {
+function normalizeCategories(
+  relations: RawCategoryRelation[] | null,
+): string[] {
   if (!relations || relations.length === 0) return [];
-
   const values = new Set<string>();
-
   for (const relation of relations) {
     const categories = relation.categories;
-
     if (!categories) continue;
-
     if (Array.isArray(categories)) {
       for (const item of categories) {
         if (item.name) values.add(item.name);
       }
       continue;
     }
-
     if (categories.name) values.add(categories.name);
   }
-
-  return Array.from(values).sort((a, b) => a.localeCompare(b));
+  return Array.from(values).sort((left, right) => left.localeCompare(right));
 }
 
-function normalizeCopyStatuses(relations: RawCopyStatusRelation[] | null): string[] {
+function normalizeCopyStatuses(
+  relations: RawCopyStatusRelation[] | null,
+): string[] {
   if (!relations || relations.length === 0) return [];
-
   const values = new Set<AvailabilityState>();
-
   for (const relation of relations) {
     const status = relation.status?.toLowerCase();
-    if (status === "available" || status === "borrowed" || status === "reserved") {
+    if (
+      status === "available" ||
+      status === "borrowed" ||
+      status === "reserved"
+    )
       values.add(status);
-    }
   }
-
   return Array.from(values);
 }
 
@@ -127,24 +146,21 @@ function normalizeBook(record: RawBookRecord): SearchBook {
     coverImageUrl: record.cover_image_url,
     availableCopies: record.available_copies,
     totalCopies: record.total_copies,
+    createdAt: record.created_at,
     tags: normalizeTags(record.tags),
     copyStatuses: normalizeCopyStatuses(record.book_copies),
     categories: normalizeCategories(record.book_categories),
-    authors: normalizeAuthors(record.book_authors)
+    authors: normalizeAuthors(record.book_authors),
   };
 }
 
 function getAvailabilityState(book: SearchBook): AvailabilityState {
   const statusSet = new Set(book.copyStatuses);
-
   if (statusSet.has("available")) return "available";
   if (statusSet.has("borrowed")) return "borrowed";
   if (statusSet.has("reserved")) return "reserved";
-
-  // Fallback for incomplete copy rows: infer from copy counters.
   if (book.availableCopies > 0) return "available";
-  if (book.totalCopies > 0 && book.availableCopies <= 0) return "borrowed";
-
+  if (book.totalCopies > 0) return "borrowed";
   return "reserved";
 }
 
@@ -154,14 +170,12 @@ function getAvailabilityLabel(status: AvailabilityState): string {
   return "Reserved";
 }
 
-function matchesAvailability(filter: FilterAvailability, status: AvailabilityState) {
+function matchesAvailability(
+  filter: FilterAvailability,
+  status: AvailabilityState,
+) {
   if (filter === "all") return true;
   return filter === status;
-}
-
-function canReserveFromSearch(status: AvailabilityState) {
-  // Reservation workspace currently accepts direct reserve from available inventory.
-  return status === "available";
 }
 
 function getAvailabilityRank(status: AvailabilityState) {
@@ -170,40 +184,52 @@ function getAvailabilityRank(status: AvailabilityState) {
   return 1;
 }
 
+function escapeIlike(value: string) {
+  return value.replace(/[%_]/g, (match) => `\\${match}`);
+}
+
+function uniqueIds(rows: Array<{ book_id: string | null }>) {
+  return Array.from(
+    new Set(rows.map((row) => row.book_id).filter((id): id is string => Boolean(id))),
+  );
+}
+
 function formatLastSync(value: string | null) {
   if (!value) return "Waiting for first sync";
-
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "Waiting for first sync";
-
-  return `Last sync ${date.toLocaleTimeString(undefined, {
-    hour: "numeric",
-    minute: "2-digit",
-    second: "2-digit"
-  })}`;
+  return `Last sync ${date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", second: "2-digit" })}`;
 }
 
-function getBookMonogram(title: string): string {
-  const letters = title
-    .split(" ")
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part.charAt(0).toUpperCase())
-    .join("");
-
-  return letters || "BK";
-}
-
-function getToneClass(seed: string): string {
-  const hash = Array.from(seed).reduce((acc, char) => acc + char.charCodeAt(0), 0);
-  return `tone-${(hash % 5) + 1}`;
-}
-
-function onCardKeyDown(event: KeyboardEvent<HTMLElement>, onActivate: () => void) {
-  if (event.key === "Enter" || event.key === " ") {
-    event.preventDefault();
-    onActivate();
-  }
+function BookCardSkeletonGrid({
+  count,
+  variant = "results",
+}: {
+  count: number;
+  variant?: "feature" | "results";
+}) {
+  const gridClass =
+    variant === "feature"
+      ? "grid gap-4 md:grid-cols-2 xl:grid-cols-4"
+      : "grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5";
+  return (
+    <div className={gridClass} aria-hidden="true">
+      {Array.from({ length: count }, (_, i) => (
+        <div
+          key={i}
+          className="min-h-[29rem] animate-pulse overflow-hidden rounded-[1.35rem] border border-slate-100 bg-white"
+        >
+          <div className="h-48 bg-slate-100" />
+          <div className="grid gap-3 p-3.5">
+            <div className="h-4 w-3/4 rounded bg-slate-100" />
+            <div className="h-3 w-1/2 rounded bg-slate-100" />
+            <div className="h-3 w-5/6 rounded bg-slate-100" />
+            <div className="mt-5 h-9 rounded-xl bg-slate-100" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 export default function SearchPage() {
@@ -215,41 +241,48 @@ export default function SearchPage() {
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
   const [books, setBooks] = useState<SearchBook[]>([]);
-  const [categories, setCategories] = useState<CategoryRow[]>([]);
+  const [catalogPage, setCatalogPage] = useState(0);
+  const [hasMoreBooks, setHasMoreBooks] = useState(false);
+  const [reservedBookIds, setReservedBookIds] = useState<Set<string>>(
+    new Set(),
+  );
+  const [borrowedHistoryBookIds, setBorrowedHistoryBookIds] = useState<
+    Set<string>
+  >(new Set());
   const [searchInput, setSearchInput] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedCategory, setSelectedCategory] = useState("all");
   const [selectedLanguage, setSelectedLanguage] = useState("all");
-  const [availabilityFilter, setAvailabilityFilter] = useState<FilterAvailability>("all");
+  const [availabilityFilter, setAvailabilityFilter] =
+    useState<FilterAvailability>("all");
+  const [activeReserveBookId, setActiveReserveBookId] = useState<string | null>(
+    null,
+  );
+  const [reservationBook, setReservationBook] = useState<SearchBook | null>(
+    null,
+  );
+  const catalogRequestIdRef = useRef(0);
 
   useEffect(() => {
     let isMounted = true;
-
     const bootstrap = async () => {
       if (!hasSupabaseEnv) {
         setIsBootstrapping(false);
         return;
       }
-
       const {
-        data: { session: currentSession }
+        data: { session: currentSession },
       } = await supabase.auth.getSession();
-
       if (!isMounted) return;
-
       if (!currentSession) {
         navigate("/", { replace: true });
         return;
       }
-
       setSession(currentSession);
       setIsBootstrapping(false);
     };
-
     void bootstrap();
-
     const {
-      data: { subscription }
+      data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       if (!nextSession) {
         navigate("/", { replace: true });
@@ -257,217 +290,290 @@ export default function SearchPage() {
       }
       setSession(nextSession);
     });
-
     return () => {
       isMounted = false;
       subscription.unsubscribe();
     };
   }, [navigate]);
 
-  const loadCatalog = useCallback(async (source: LoadSource = "manual") => {
-    if (source === "manual") {
-      setIsFetching(true);
-    } else {
-      setIsLiveSyncing(true);
-    }
+  const loadCatalog = useCallback(
+    async (source: LoadSource = "manual", page = 0) => {
+      if (!session?.user.id) return;
+      const requestId = catalogRequestIdRef.current + 1;
+      catalogRequestIdRef.current = requestId;
+      const from = page * CATALOG_PAGE_SIZE;
+      const to = from + CATALOG_PAGE_SIZE - 1;
+      const keyword = searchQuery.trim();
+      const escapedKeyword = escapeIlike(keyword);
 
-    const [booksResult, categoriesResult] = await Promise.all([
-      supabase
+      if (source === "manual") {
+        setIsFetching(true);
+      } else {
+        setIsLiveSyncing(true);
+      }
+
+      const [authorMatchResult, categoryMatchResult] = keyword
+        ? await Promise.all([
+            supabase
+              .from("book_authors")
+              .select("book_id,authors!inner(name)")
+              .ilike("authors.name", `%${escapedKeyword}%`)
+              .limit(200),
+            supabase
+              .from("book_categories")
+              .select("book_id,categories!inner(name)")
+              .ilike("categories.name", `%${escapedKeyword}%`)
+              .limit(200),
+          ])
+        : [
+            { data: [], error: null },
+            { data: [], error: null },
+          ];
+
+      if (requestId !== catalogRequestIdRef.current) {
+        return;
+      }
+
+      const relationSearchError =
+        authorMatchResult.error ?? categoryMatchResult.error;
+      if (relationSearchError) {
+        setNotice(relationSearchError.message);
+        if (source === "manual") setIsFetching(false);
+        else setIsLiveSyncing(false);
+        return;
+      }
+
+      const relationBookIds = uniqueIds([
+        ...((authorMatchResult.data ?? []) as Array<{ book_id: string | null }>),
+        ...((categoryMatchResult.data ?? []) as Array<{ book_id: string | null }>),
+      ]);
+
+      let booksQuery = supabase
         .from("books")
-        .select(
-          "id,isbn,title,subtitle,description,publisher,language,publication_year,publication_date,cover_image_url,available_copies,total_copies,tags,book_copies(status),book_categories(category_id,categories(id,name)),book_authors(author_id,authors(id,name))"
-        )
-        .order("title", { ascending: true })
-        .limit(300),
-      supabase.from("categories").select("id,name").order("name", { ascending: true })
-    ]);
+        .select(BOOK_SELECT)
+        .order("title", { ascending: true });
 
-    if (booksResult.error) {
-      setNotice(booksResult.error.message);
+      if (keyword) {
+        const textFilters = [
+          `title.ilike.%${escapedKeyword}%`,
+          `subtitle.ilike.%${escapedKeyword}%`,
+          `description.ilike.%${escapedKeyword}%`,
+          `publisher.ilike.%${escapedKeyword}%`,
+          `language.ilike.%${escapedKeyword}%`,
+          `isbn.ilike.%${escapedKeyword}%`,
+        ];
+        if (relationBookIds.length > 0) {
+          textFilters.push(`id.in.(${relationBookIds.join(",")})`);
+        }
+        booksQuery = booksQuery.or(textFilters.join(","));
+      }
+
+      if (selectedLanguage !== "all") {
+        booksQuery = booksQuery.eq("language", selectedLanguage);
+      }
+
+      if (availabilityFilter === "available") {
+        booksQuery = booksQuery.gt("available_copies", 0);
+      } else if (
+        availabilityFilter === "borrowed" ||
+        availabilityFilter === "reserved"
+      ) {
+        booksQuery = booksQuery.eq("available_copies", 0);
+      }
+
+      const [booksResult, historyResult] = await Promise.all([
+        booksQuery.range(from, to),
+        supabase
+          .from("reservations")
+          .select("book_id,status")
+          .eq("user_id", session.user.id)
+          .in("status", [
+            "pending",
+            "approved",
+            "ready_for_pickup",
+            "reserved",
+            "queued",
+            "picked_up",
+            "fulfilled",
+            "returned",
+            "expired",
+          ]),
+      ]);
+
+      if (requestId !== catalogRequestIdRef.current) {
+        return;
+      }
+
+      const firstError = booksResult.error ?? historyResult.error;
+      if (firstError) {
+        setNotice(firstError.message);
+        if (source === "manual") {
+          setIsFetching(false);
+        } else {
+          setIsLiveSyncing(false);
+        }
+        return;
+      }
+
+      const reservationHistory = (historyResult.data ??
+        []) as ReservationHistoryRow[];
+      const nextBooks = ((booksResult.data ?? []) as RawBookRecord[]).map(
+        normalizeBook,
+      );
+      setBooks((previous) => {
+        if (page === 0) return nextBooks;
+        const merged = new Map(previous.map((book) => [book.id, book]));
+        for (const book of nextBooks) merged.set(book.id, book);
+        return Array.from(merged.values());
+      });
+      setCatalogPage(page);
+      setHasMoreBooks(nextBooks.length === CATALOG_PAGE_SIZE);
+      setReservedBookIds(
+        new Set(
+          reservationHistory
+            .filter(
+              (e) =>
+                e.status === "approved" ||
+                e.status === "pending" ||
+                e.status === "ready_for_pickup" ||
+                e.status === "reserved" ||
+                e.status === "queued" ||
+                e.status === "picked_up",
+            )
+            .map((e) => e.book_id),
+        ),
+      );
+      setBorrowedHistoryBookIds(
+        new Set(
+          reservationHistory
+            .filter(
+              (e) =>
+                e.status === "fulfilled" ||
+                e.status === "returned" ||
+                e.status === "expired",
+            )
+            .map((e) => e.book_id),
+        ),
+      );
+      setNotice("");
+      setLastSyncedAt(new Date().toISOString());
       if (source === "manual") {
         setIsFetching(false);
       } else {
         setIsLiveSyncing(false);
       }
-      return;
-    }
-
-    if (categoriesResult.error) {
-      setNotice(categoriesResult.error.message);
-      if (source === "manual") {
-        setIsFetching(false);
-      } else {
-        setIsLiveSyncing(false);
-      }
-      return;
-    }
-
-    setBooks(((booksResult.data ?? []) as RawBookRecord[]).map(normalizeBook));
-    setCategories((categoriesResult.data ?? []) as CategoryRow[]);
-    setNotice("");
-    setLastSyncedAt(new Date().toISOString());
-
-    if (source === "manual") {
-      setIsFetching(false);
-    } else {
-      setIsLiveSyncing(false);
-    }
-  }, []);
+    },
+    [session?.user.id],
+  );
 
   useEffect(() => {
     if (!session?.user.id) return;
-    void loadCatalog("manual");
-  }, [session?.user.id, loadCatalog]);
+    void loadCatalog("manual", 0);
+  }, [
+    availabilityFilter,
+    loadCatalog,
+    searchQuery,
+    selectedLanguage,
+    session?.user.id,
+  ]);
 
   useEffect(() => {
     if (!session?.user.id || !hasSupabaseEnv) return;
-
     let refreshTimeout: ReturnType<typeof setTimeout> | null = null;
-
     const queueLiveRefresh = () => {
-      if (refreshTimeout) {
-        window.clearTimeout(refreshTimeout);
-      }
-
+      if (refreshTimeout) window.clearTimeout(refreshTimeout);
       refreshTimeout = window.setTimeout(() => {
-        void loadCatalog("live");
-      }, 320);
+        void loadCatalog("live", 0);
+      }, 600);
     };
-
     const channel = supabase
       .channel(`search-realtime-${session.user.id}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "books" }, queueLiveRefresh)
-      .on("postgres_changes", { event: "*", schema: "public", table: "book_copies" }, queueLiveRefresh)
-      .on("postgres_changes", { event: "*", schema: "public", table: "book_categories" }, queueLiveRefresh)
-      .on("postgres_changes", { event: "*", schema: "public", table: "book_authors" }, queueLiveRefresh)
-      .on("postgres_changes", { event: "*", schema: "public", table: "categories" }, queueLiveRefresh)
-      .on("postgres_changes", { event: "*", schema: "public", table: "authors" }, queueLiveRefresh)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "books" },
+        queueLiveRefresh,
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "book_copies" },
+        queueLiveRefresh,
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "book_categories" },
+        queueLiveRefresh,
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "book_authors" },
+        queueLiveRefresh,
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "reservations",
+          filter: `user_id=eq.${session.user.id}`,
+        },
+        queueLiveRefresh,
+      )
       .subscribe();
-
     return () => {
-      if (refreshTimeout) {
-        window.clearTimeout(refreshTimeout);
-      }
+      if (refreshTimeout) window.clearTimeout(refreshTimeout);
       void supabase.removeChannel(channel);
     };
-  }, [session?.user.id, loadCatalog]);
-
-  useEffect(() => {
-    if (selectedCategory === "all") return;
-    const categoryStillExists = categories.some((category) => category.name === selectedCategory);
-    if (!categoryStillExists) {
-      setSelectedCategory("all");
-    }
-  }, [categories, selectedCategory]);
+  }, [loadCatalog, session?.user.id]);
 
   const allLanguages = useMemo(() => {
     const values = new Set<string>();
     for (const book of books) {
       if (book.language) values.add(book.language);
     }
-    return Array.from(values).sort((a, b) => a.localeCompare(b));
+    return Array.from(values).sort((l, r) => l.localeCompare(r));
   }, [books]);
 
-  const filteredBooks = useMemo(() => {
-    const keyword = searchQuery.trim().toLowerCase();
-
-    return books.filter((book) => {
-      const bookAvailability = getAvailabilityState(book);
-      const matchesCategory = selectedCategory === "all" || book.categories.includes(selectedCategory);
-
-      if (!matchesCategory) return false;
-      if (selectedLanguage !== "all" && book.language !== selectedLanguage) return false;
-      if (!matchesAvailability(availabilityFilter, bookAvailability)) return false;
-
-      if (!keyword) return true;
-
-      const searchableValues = [
-        book.title,
-        book.subtitle ?? "",
-        book.description ?? "",
-        book.publisher ?? "",
-        book.language ?? "",
-        book.publicationDate ?? "",
-        book.publicationYear ? String(book.publicationYear) : "",
-        book.isbn ?? "",
-        book.tags.join(" "),
-        book.categories.join(" "),
-        book.authors.join(" ")
-      ];
-
-      return searchableValues.some((value) => value.toLowerCase().includes(keyword));
-    });
-  }, [books, searchQuery, selectedCategory, selectedLanguage, availabilityFilter]);
-
-  const categoryCounts = useMemo(() => {
-    const counts = new Map<string, number>();
-
-    for (const category of categories) {
-      counts.set(category.name, 0);
-    }
-
-    for (const book of books) {
-      const uniqueCategories = new Set(book.categories);
-      for (const category of uniqueCategories) {
-        if (!counts.has(category)) {
-          counts.set(category, 0);
-        }
-        counts.set(category, (counts.get(category) ?? 0) + 1);
-      }
-    }
-
-    return Array.from(counts.entries())
-      .map(([name, count]) => {
-        const category = categories.find((entry) => entry.name === name);
-        return {
-          id: category?.id ?? name,
-          name,
-          count
-        };
-      })
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }, [books, categories]);
+  const filteredBooks = useMemo(() => books, [books]);
 
   const featuredBooks = useMemo(() => {
-    return [...filteredBooks]
-      .sort((a, b) => {
-        const availabilityRankA =
-          getAvailabilityRank(getAvailabilityState(a));
-        const availabilityRankB =
-          getAvailabilityRank(getAvailabilityState(b));
-
-        if (availabilityRankA !== availabilityRankB) {
-          return availabilityRankB - availabilityRankA;
-        }
-
-        if (a.availableCopies !== b.availableCopies) {
-          return b.availableCopies - a.availableCopies;
-        }
-
-        return a.title.localeCompare(b.title);
+    return [...books]
+      .sort((l, r) => {
+        const rankL = getAvailabilityRank(getAvailabilityState(l));
+        const rankR = getAvailabilityRank(getAvailabilityState(r));
+        if (rankL !== rankR) return rankR - rankL;
+        if (l.availableCopies !== r.availableCopies)
+          return r.availableCopies - l.availableCopies;
+        return l.title.localeCompare(r.title);
       })
       .slice(0, 8);
-  }, [filteredBooks]);
+  }, [books]);
 
-  const hasFilters =
+  const newBooks = useMemo(() => {
+    return [...books]
+      .sort((l, r) => {
+        const timeL = new Date(l.createdAt).getTime();
+        const timeR = new Date(r.createdAt).getTime();
+        if (timeL !== timeR) return timeR - timeL;
+        return l.title.localeCompare(r.title);
+      })
+      .slice(0, 4);
+  }, [books]);
+
+  const isFocusedBrowse =
     searchQuery.trim().length > 0 ||
-    selectedCategory !== "all" ||
     selectedLanguage !== "all" ||
     availabilityFilter !== "all";
 
-  const shouldShowResultsSection = hasFilters;
-
-  const clearFilters = () => {
-    setSearchInput("");
-    setSearchQuery("");
-    setSelectedCategory("all");
-    setSelectedLanguage("all");
-    setAvailabilityFilter("all");
-  };
-
   const handleSearchSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    setCatalogPage(0);
+    setBooks([]);
     setSearchQuery(searchInput.trim());
+  };
+
+  const openReservationModal = (book: SearchBook) => {
+    setNotice("");
+    setReservationBook(book);
   };
 
   const handleSignOut = async () => {
@@ -484,13 +590,15 @@ export default function SearchPage() {
         <section className="portal-shell portal-single">
           <article className="portal-panel">
             <h1>Supabase not configured</h1>
-            <p>Add your values in `web/.env` before using catalog search features.</p>
+            <p>
+              Add your values in `web/.env` before using catalog search
+              features.
+            </p>
           </article>
         </section>
       </main>
     );
   }
-
   if (isBootstrapping) {
     return (
       <main className="portal-page">
@@ -508,7 +616,7 @@ export default function SearchPage() {
       activeRoute="search"
       activeMenuKey="discover"
       title="Discover"
-      description="Find books from live catalog data, filter by category, and reserve available titles."
+      description="A cleaner academic browsing flow for finding, comparing, and reserving catalog titles."
       userEmail={userEmail}
       notifier={{
         notifications: notifier.notifications,
@@ -517,300 +625,349 @@ export default function SearchPage() {
         onToggle: notifier.toggleOpen,
         onClose: notifier.close,
         onMarkRead: notifier.markAsRead,
-        onMarkAllRead: notifier.markAllAsRead
+        onMarkAllRead: notifier.markAllAsRead,
       }}
       sidebarStats={[
         { label: "Books", value: String(books.length) },
-        { label: "Categories", value: String(categories.length) }
+        { label: "Matches", value: String(filteredBooks.length) },
       ]}
       sidebarAction={{
         label: isFetching ? "Refreshing..." : "Refresh Data",
         onClick: () => {
-          void loadCatalog("manual");
+          void loadCatalog("manual", 0);
         },
-        disabled: isFetching
+        disabled: isFetching,
       }}
       statusBar={
         <PortalLiveIndicator
           isSyncing={isLiveSyncing}
-          text={`${isLiveSyncing ? "Syncing live updates..." : "Live availability active"} | ${formatLastSync(lastSyncedAt)}`}
+          text={`${isLiveSyncing ? "Syncing catalog..." : "Catalog synced"} | ${formatLastSync(lastSyncedAt)}`}
         />
       }
-      notice={notice ? <p className="status error portal-notice">{notice}</p> : undefined}
+      notice={
+        notice ? (
+          <p className="status error portal-notice">{notice}</p>
+        ) : undefined
+      }
       onNavigate={(route) => navigate(`/${route}`)}
       onSignOut={handleSignOut}
     >
-      <form className="discover-searchbar" onSubmit={handleSearchSubmit}>
-        <label htmlFor="category-filter" className="discover-field discover-field-select">
-          <span>Category</span>
-          <select
-            id="category-filter"
-            value={selectedCategory}
-            onChange={(event) => setSelectedCategory(event.target.value)}
+      <div className="space-y-5">
+        <section className="rounded-[1.8rem] border border-slate-200 bg-white/95 p-5 shadow-[0_20px_50px_rgba(15,23,42,0.06)]">
+          <form
+            className="grid items-end gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,0.9fr)_minmax(0,0.9fr)_auto]"
+            onSubmit={handleSearchSubmit}
           >
-            <option value="all">All categories</option>
-            {categories.map((category) => (
-              <option key={category.id} value={category.name}>
-                {category.name}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label htmlFor="catalog-search" className="discover-field discover-field-search">
-          <span>Search books</span>
-          <input
-            id="catalog-search"
-            type="search"
-            value={searchInput}
-            onChange={(event) => {
-              const nextValue = event.target.value;
-              setSearchInput(nextValue);
-              if (!nextValue.trim()) {
-                setSearchQuery("");
-              }
-            }}
-            placeholder="Find title, author, ISBN, tags, or year"
-          />
-        </label>
-
-        <button type="submit" className="btn btn-primary discover-search-btn">
-          Search
-        </button>
-      </form>
-
-      <section className="discover-filter-toolbar" aria-label="Search filters and status">
-        <div className="discover-filter-controls">
-          <label htmlFor="language-filter" className="discover-inline-filter">
-            <span>Language</span>
-            <select
-              id="language-filter"
-              value={selectedLanguage}
-              onChange={(event) => setSelectedLanguage(event.target.value)}
+            <label className="flex flex-col gap-2">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">
+                Search
+              </span>
+              <input
+                type="search"
+                value={searchInput}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setSearchInput(v);
+                  if (!v.trim()) setSearchQuery("");
+                }}
+                placeholder="Find title, author, ISBN, tags, or year"
+                className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-emerald-300 focus:bg-white"
+              />
+            </label>
+            <label className="flex flex-col gap-2">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">
+                Language
+              </span>
+              <select
+                value={selectedLanguage}
+                onChange={(e) => {
+                  setSelectedLanguage(e.target.value);
+                  setCatalogPage(0);
+                  setBooks([]);
+                }}
+                className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-emerald-300 focus:bg-white"
+              >
+                <option value="all">All languages</option>
+                {allLanguages.map((l) => (
+                  <option key={l} value={l}>
+                    {l}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex flex-col gap-2">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">
+                Availability
+              </span>
+              <select
+                value={availabilityFilter}
+                onChange={(e) =>
+                  {
+                    setAvailabilityFilter(e.target.value as FilterAvailability);
+                    setCatalogPage(0);
+                    setBooks([]);
+                  }
+                }
+                className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-emerald-300 focus:bg-white"
+              >
+                <option value="all">All statuses</option>
+                <option value="available">Available</option>
+                <option value="borrowed">Borrowed</option>
+                <option value="reserved">Reserved</option>
+              </select>
+            </label>
+            <button
+              type="submit"
+              className="w-auto self-end rounded-2xl bg-emerald-700 px-6 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-800"
             >
-              <option value="all">All languages</option>
-              {allLanguages.map((language) => (
-                <option key={language} value={language}>
-                  {language}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label htmlFor="availability-filter" className="discover-inline-filter">
-            <span>Availability</span>
-            <select
-              id="availability-filter"
-              value={availabilityFilter}
-              onChange={(event) => setAvailabilityFilter(event.target.value as FilterAvailability)}
-            >
-              <option value="all">All statuses</option>
-              <option value="available">Available</option>
-              <option value="borrowed">Borrowed</option>
-              <option value="reserved">Reserved</option>
-            </select>
-          </label>
-
-          {hasFilters ? (
-            <button type="button" className="btn btn-soft btn-small" onClick={clearFilters}>
-              Clear filters
+              Search collection
             </button>
-          ) : null}
-        </div>
-      </section>
+          </form>
+        </section>
 
-      <section className="discover-section" aria-label="Book recommendations">
-        <header className="discover-section-head">
-          <h2>Book Recommendation</h2>
-          <button
-            type="button"
-            className="discover-view-link"
-            onClick={() => {
-              clearFilters();
-            }}
-          >
-            View all
-          </button>
-        </header>
-
-        {featuredBooks.length === 0 ? (
-          <p className="empty-state">No books found for the current filters.</p>
-        ) : (
-          <div className="discover-recommend-grid">
-            {featuredBooks.map((book) => {
-              const availability = getAvailabilityState(book);
-              return (
-                <article
-                  key={`featured-${book.id}`}
-                  className="discover-recommend-card book-card-link"
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => navigate(`/books/${book.id}`)}
-                  onKeyDown={(event) => onCardKeyDown(event, () => navigate(`/books/${book.id}`))}
-                >
-                  <div
-                    className={`discover-book-cover ${getToneClass(book.id)} ${book.coverImageUrl ? "has-image" : ""}`.trim()}
-                    style={
-                      book.coverImageUrl
-                        ? {
-                            backgroundImage: `linear-gradient(165deg, rgba(7, 66, 52, 0.42), rgba(7, 66, 52, 0.08)), url(${book.coverImageUrl})`
-                          }
-                        : undefined
-                    }
-                  >
-                    {!book.coverImageUrl ? <span>{getBookMonogram(book.title)}</span> : null}
-                  </div>
-
-                  <h3 title={book.title}>{book.title}</h3>
-                  <p>{book.subtitle ?? book.publisher ?? "Catalog record"}</p>
-                  <p className="discover-recommend-byline">By {formatAuthorLine(book.authors)}</p>
-
-                  <div className="discover-recommend-meta">
-                    <span className={`availability-pill ${availability}`}>{getAvailabilityLabel(availability)}</span>
-                    <button
-                      type="button"
-                      className="btn btn-soft btn-small"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        navigate("/reservations");
-                      }}
-                      onKeyDown={(event) => event.stopPropagation()}
-                      disabled={!canReserveFromSearch(availability)}
-                    >
-                      {!canReserveFromSearch(availability) ? "Unavailable" : "Reserve"}
-                    </button>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        )}
-      </section>
-
-      <section className="discover-section" aria-label="Book categories">
-        <header className="discover-section-head">
-          <h2>Book Category</h2>
-        </header>
-
-        {categoryCounts.length === 0 ? (
-          <p className="empty-state">No categories found in the database yet.</p>
-        ) : (
-          <div className="discover-category-grid">
-            {categoryCounts.map((entry: CategoryCount) => {
-              const isActive = selectedCategory === entry.name;
-
-              return (
-                <button
-                  key={entry.id}
-                  type="button"
-                  className={`discover-category-card ${isActive ? "active" : ""}`.trim()}
-                  onClick={() => setSelectedCategory(isActive ? "all" : entry.name)}
-                >
-                  <strong>{entry.name}</strong>
-                  <span>{entry.count} titles</span>
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </section>
-
-      {shouldShowResultsSection ? (
-        <section className="discover-section" aria-label="Search results">
-          <header className="discover-section-head">
-            <h2>Search Results</h2>
-          </header>
-
-          {filteredBooks.length === 0 ? (
-            <p className="empty-state">No books match the current filters.</p>
-          ) : (
-            <div className="discover-results-grid">
-              {filteredBooks.map((book) => {
-                const availabilityState = getAvailabilityState(book);
-
+        {!isFocusedBrowse ? (
+          <section className="rounded-[1.8rem] border border-slate-200 bg-white/95 p-5 shadow-[0_20px_50px_rgba(15,23,42,0.06)]">
+            <div className="mb-5 flex items-end justify-between gap-4">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-emerald-700">
+                  New Books
+                </p>
+                <h2 className="mt-2 text-xl font-semibold tracking-tight text-slate-900">
+                  Recently added titles
+                </h2>
+                <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500">
+                  Fresh catalog records appear here as soon as they are added by the library team.
+                </p>
+              </div>
+            </div>
+            {isFetching && books.length === 0 ? (
+              <BookCardSkeletonGrid count={4} variant="feature" />
+            ) : (
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                {newBooks.map((book) => {
+                const availability = getAvailabilityState(book);
+                const isReserved = reservedBookIds.has(book.id);
+                const isSaving = activeReserveBookId === book.id;
+                const canReserve = !isReserved && availability === "available";
                 return (
-                  <article
+                  <CatalogBookCard
                     key={book.id}
-                    className="discover-result-card book-card-link"
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => navigate(`/books/${book.id}`)}
-                    onKeyDown={(event) => onCardKeyDown(event, () => navigate(`/books/${book.id}`))}
-                  >
-                    <div
-                      className={`discover-result-cover ${getToneClass(book.id)} ${book.coverImageUrl ? "has-image" : ""}`.trim()}
-                      style={
-                        book.coverImageUrl
-                          ? {
-                              backgroundImage: `linear-gradient(165deg, rgba(7, 66, 52, 0.42), rgba(7, 66, 52, 0.08)), url(${book.coverImageUrl})`
-                            }
-                          : undefined
-                      }
-                    >
-                      {!book.coverImageUrl ? <span>{getBookMonogram(book.title)}</span> : null}
-                    </div>
+                    title={book.title}
+                    subtitle={book.subtitle ?? book.publisher ?? "New catalog record"}
+                    authorLine={`By ${formatAuthorLine(book.authors)}`}
+                    coverImageUrl={book.coverImageUrl}
+                    availabilityLabel={isReserved ? "Reserved" : getAvailabilityLabel(availability)}
+                    availabilityTone={isReserved ? "reserved" : availability}
+                    metaItems={[
+                      formatPublicationLabel(book.publicationDate, book.publicationYear),
+                      `${book.availableCopies} available of ${book.totalCopies}`,
+                      book.language ?? "Language not set",
+                    ]}
+                    actionLabel={
+                      isSaving
+                        ? "Saving..."
+                        : canReserve
+                          ? "Reserve"
+                          : isReserved
+                            ? "Reserved"
+                            : "Unavailable"
+                    }
+                    actionDisabled={!canReserve || isSaving}
+                    hasBorrowedBefore={borrowedHistoryBookIds.has(book.id)}
+                    onOpenDetails={() => navigate(`/books/${book.id}`)}
+                    onAction={() => {
+                      openReservationModal(book);
+                    }}
+                  />
+                );
+                })}
+              </div>
+            )}
+          </section>
+        ) : null}
 
-                    <div className="discover-result-content">
-                      <div className="discover-result-head">
-                        <h3>{book.title}</h3>
-                        <span className={`availability-pill ${availabilityState}`}>
-                          {getAvailabilityLabel(availabilityState)}
-                        </span>
-                      </div>
+        {!isFocusedBrowse ? (
+          <section className="rounded-[1.8rem] border border-slate-200 bg-white/95 p-5 shadow-[0_20px_50px_rgba(15,23,42,0.06)]">
+            <div className="mb-5 flex items-end justify-between gap-4">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-emerald-700">
+                  Recommendations
+                </p>
+                <h2 className="mt-2 text-xl font-semibold tracking-tight text-slate-900">
+                  Featured reading picks
+                </h2>
+                <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500">
+                  These cards stay visible only while the browse view is broad.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => navigate("/category")}
+                className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-emerald-200 hover:text-emerald-700"
+              >
+                Open category page
+              </button>
+            </div>
+            {isFetching && books.length === 0 ? (
+              <BookCardSkeletonGrid count={8} variant="feature" />
+            ) : (
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                {featuredBooks.map((book) => {
+                const availability = getAvailabilityState(book);
+                const isReserved = reservedBookIds.has(book.id);
+                const isSaving = activeReserveBookId === book.id;
+                const canReserve = !isReserved && availability === "available";
+                return (
+                  <CatalogBookCard
+                    key={book.id}
+                    title={book.title}
+                    subtitle={
+                      book.subtitle ?? book.publisher ?? "Catalog record"
+                    }
+                    authorLine={`By ${formatAuthorLine(book.authors)}`}
+                    coverImageUrl={book.coverImageUrl}
+                    availabilityLabel={
+                      isReserved
+                        ? "Reserved"
+                        : getAvailabilityLabel(availability)
+                    }
+                    availabilityTone={isReserved ? "reserved" : availability}
+                    metaItems={[
+                      formatPublicationLabel(
+                        book.publicationDate,
+                        book.publicationYear,
+                      ),
+                      `${book.availableCopies} available of ${book.totalCopies}`,
+                      book.language ?? "Language not set",
+                    ]}
+                    actionLabel={
+                      isSaving
+                        ? "Saving..."
+                        : canReserve
+                          ? "Reserve"
+                          : isReserved
+                            ? "Reserved"
+                            : "Unavailable"
+                    }
+                    actionDisabled={!canReserve || isSaving}
+                    hasBorrowedBefore={borrowedHistoryBookIds.has(book.id)}
+                    onOpenDetails={() => navigate(`/books/${book.id}`)}
+                    onAction={() => {
+                      openReservationModal(book);
+                    }}
+                  />
+                );
+                })}
+              </div>
+            )}
+          </section>
+        ) : null}
 
-                      <div className="discover-book-meta-grid">
-                        <p className="discover-result-meta"><strong>Author:</strong> {formatAuthorLine(book.authors)}</p>
-                        <p className="discover-result-meta"><strong>Publish date:</strong> {formatPublicationLabel(book.publicationDate, book.publicationYear)}</p>
-                        <p className="discover-result-meta"><strong>ISBN:</strong> {book.isbn ?? "N/A"}</p>
-                        <p className="discover-result-meta"><strong>Publisher:</strong> {book.publisher ?? "N/A"}</p>
-                        <p className="discover-result-meta"><strong>Language:</strong> {book.language ?? "N/A"}</p>
-                        <p className="discover-result-meta"><strong>Copies:</strong> {book.availableCopies} available / {book.totalCopies} total</p>
-                        <p className="discover-result-meta"><strong>Subtitle:</strong> {book.subtitle ?? "N/A"}</p>
-                        <p className="discover-result-meta"><strong>Tags:</strong> {book.tags.length > 0 ? book.tags.join(", ") : "None"}</p>
-                      </div>
+        <section className="rounded-[1.8rem] border border-slate-200 bg-white/95 p-5 shadow-[0_20px_50px_rgba(15,23,42,0.06)]">
+          <div className="mb-5 flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-emerald-700">
+                Focused Results
+              </p>
+              <h2 className="mt-2 text-xl font-semibold tracking-tight text-slate-900">
+                Browse matching titles
+              </h2>
+              <p className="mt-1 text-sm leading-6 text-slate-500">
+                Clean, badge-driven cards keep the catalog easy to scan.
+              </p>
+            </div>
+            <p className="text-sm font-medium text-slate-500">
+              {filteredBooks.length} matching books loaded
+            </p>
+          </div>
 
-                      <p className="discover-result-description">
-                        <strong>Description:</strong> {book.description ?? "No description provided."}
-                      </p>
-
-                      {book.categories.length > 0 ? (
-                        <div className="search-book-tags">
-                          {book.categories.map((category) => (
-                            <span key={`${book.id}-${category}`} className="category-badge">
-                              {category}
-                            </span>
-                          ))}
-                        </div>
-                      ) : null}
-
-                      <div className="discover-result-actions">
-                        <button
-                          type="button"
-                          className="btn btn-primary btn-small"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            navigate("/reservations");
-                          }}
-                          onKeyDown={(event) => event.stopPropagation()}
-                          disabled={!canReserveFromSearch(availabilityState)}
-                        >
-                          {!canReserveFromSearch(availabilityState) ? "Unavailable right now" : "Reserve from reservations"}
-                        </button>
-                      </div>
-                    </div>
-                  </article>
+          {isFetching && books.length === 0 ? (
+            <BookCardSkeletonGrid count={10} />
+          ) : filteredBooks.length === 0 ? (
+            <div className="rounded-[1.6rem] border border-dashed border-slate-200 bg-slate-50 px-5 py-10 text-center text-sm text-slate-500">
+              No books match the current search and filter combination.
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">
+              {filteredBooks.map((book) => {
+                const availability = getAvailabilityState(book);
+                const isReserved = reservedBookIds.has(book.id);
+                const isSaving = activeReserveBookId === book.id;
+                const canReserve = !isReserved && availability === "available";
+                return (
+                  <CatalogBookCard
+                    key={book.id}
+                    title={book.title}
+                    subtitle={
+                      book.subtitle ?? book.publisher ?? "Catalog record"
+                    }
+                    authorLine={`By ${formatAuthorLine(book.authors)}`}
+                    coverImageUrl={book.coverImageUrl}
+                    availabilityLabel={
+                      isReserved
+                        ? "Reserved"
+                        : getAvailabilityLabel(availability)
+                    }
+                    availabilityTone={isReserved ? "reserved" : availability}
+                    metaItems={[
+                      formatPublicationLabel(
+                        book.publicationDate,
+                        book.publicationYear,
+                      ),
+                      `${book.availableCopies} available of ${book.totalCopies}`,
+                      book.language ?? "Language not set",
+                    ]}
+                    actionLabel={
+                      isSaving
+                        ? "Saving..."
+                        : canReserve
+                          ? "Reserve"
+                          : isReserved
+                            ? "Reserved"
+                            : "Unavailable"
+                    }
+                    actionDisabled={!canReserve || isSaving}
+                    hasBorrowedBefore={borrowedHistoryBookIds.has(book.id)}
+                    onOpenDetails={() => navigate(`/books/${book.id}`)}
+                    onAction={() => {
+                      openReservationModal(book);
+                    }}
+                  />
                 );
               })}
             </div>
           )}
+          {hasMoreBooks ? (
+            <div className="mt-5 flex justify-center">
+              <button
+                type="button"
+                className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-emerald-200 hover:text-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={isFetching}
+                onClick={() => {
+                  void loadCatalog("manual", catalogPage + 1);
+                }}
+              >
+                {isFetching ? "Loading..." : "Load more books"}
+              </button>
+            </div>
+          ) : null}
         </section>
+      </div>
+      {reservationBook ? (
+        <ReservationCalendarModal
+          bookId={reservationBook.id}
+          title={reservationBook.title}
+          totalCopies={reservationBook.totalCopies}
+          onClose={() => setReservationBook(null)}
+          onError={setNotice}
+          onComplete={async (bookId, _status, message) => {
+            setReservedBookIds((previous) => new Set([...previous, bookId]));
+            setReservationBook(null);
+            await loadCatalog("live", 0);
+            setNotice(message);
+          }}
+        />
       ) : null}
     </LibraryWorkspaceLayout>
   );
 }
-
-
-
-
-
-
