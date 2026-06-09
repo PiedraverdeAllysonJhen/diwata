@@ -78,7 +78,7 @@ accessibility, minimize waiting time, and modernize the current manual reservati
 ---
 
 ## Important Links
-- Design Specs: To be added in next release.
+- Design Specs: https://github.com/PiedraverdeAllysonJhen/diwata-docportal
 - Repository: https://github.com/PiedraverdeAllysonJhen/diwata
 
 ## Authentication Email Sender Setup
