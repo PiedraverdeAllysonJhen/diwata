@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Session } from "@supabase/supabase-js";
 import { useNavigate } from "react-router-dom";
 import CatalogBookCard from "../components/CatalogBookCard";
@@ -69,6 +69,18 @@ type CategoryRow = {
   name: string;
 };
 
+type CategoryCountRow = {
+  category_id: string;
+  categories:
+    | { id: string; name: string }
+    | { id: string; name: string }[]
+    | null;
+  books:
+    | { available_copies: number | null }
+    | { available_copies: number | null }[]
+    | null;
+};
+
 type ReservationHistoryRow = {
   book_id: string;
   status:
@@ -97,6 +109,12 @@ type Notice = {
   type: "success" | "error";
   text: string;
 };
+
+const CATEGORY_PAGE_SIZE = 32;
+const BOOK_SELECT =
+  "id,isbn,title,subtitle,description,publisher,language,publication_year,publication_date,cover_image_url,available_copies,total_copies,tags,book_copies(status),book_categories(category_id,categories(id,name)),book_authors(author_id,authors(id,name))";
+const CATEGORY_BOOK_SELECT =
+  "id,isbn,title,subtitle,description,publisher,language,publication_year,publication_date,cover_image_url,available_copies,total_copies,tags,book_copies(status),book_categories!inner(category_id,categories(id,name)),book_authors(author_id,authors(id,name))";
 
 function normalizeCategories(
   relations: RawCategoryRelation[] | null,
@@ -171,6 +189,29 @@ function getAvailabilityLabel(status: AvailabilityState) {
   if (status === "available") return "Available";
   if (status === "borrowed") return "Borrowed";
   return "Reserved";
+}
+
+function normalizeCategoryCountRows(rows: CategoryCountRow[]): CategoryCount[] {
+  const counts = new Map<string, CategoryCount>();
+  for (const row of rows) {
+    const category = Array.isArray(row.categories)
+      ? (row.categories[0] ?? null)
+      : row.categories;
+    if (!category?.name) continue;
+    const book = Array.isArray(row.books) ? (row.books[0] ?? null) : row.books;
+    const current = counts.get(category.id) ?? {
+      id: category.id,
+      name: category.name,
+      count: 0,
+      availableCount: 0,
+    };
+    current.count += 1;
+    if ((book?.available_copies ?? 0) > 0) current.availableCount += 1;
+    counts.set(category.id, current);
+  }
+  return Array.from(counts.values()).sort(
+    (l, r) => r.count - l.count || l.name.localeCompare(r.name),
+  );
 }
 
 function formatLastSync(value: string | null) {
@@ -305,7 +346,11 @@ export default function CategoryPage() {
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [books, setBooks] = useState<BookRecord[]>([]);
+  const [catalogPage, setCatalogPage] = useState(0);
+  const [hasMoreBooks, setHasMoreBooks] = useState(false);
   const [categories, setCategories] = useState<CategoryRow[]>([]);
+  const [categoryCounts, setCategoryCounts] = useState<CategoryCount[]>([]);
+  const [totalBooksCount, setTotalBooksCount] = useState(0);
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [reservedBookIds, setReservedBookIds] = useState<Set<string>>(
     new Set(),
@@ -319,6 +364,12 @@ export default function CategoryPage() {
   const [reservationBook, setReservationBook] = useState<BookRecord | null>(
     null,
   );
+  const dataRequestIdRef = useRef(0);
+  const categoriesRef = useRef<CategoryRow[]>([]);
+
+  useEffect(() => {
+    categoriesRef.current = categories;
+  }, [categories]);
 
   useEffect(() => {
     let isMounted = true;
@@ -355,26 +406,49 @@ export default function CategoryPage() {
   }, [navigate]);
 
   const loadData = useCallback(
-    async (source: LoadSource = "manual") => {
+    async (source: LoadSource = "manual", page = 0) => {
       if (!session?.user.id) return;
+      const requestId = dataRequestIdRef.current + 1;
+      dataRequestIdRef.current = requestId;
+      const from = page * CATEGORY_PAGE_SIZE;
+      const to = from + CATEGORY_PAGE_SIZE - 1;
+      const activeCategory = categoriesRef.current.find(
+        (c) => c.name === selectedCategory,
+      );
+      const activeCategoryId =
+        selectedCategory === "all" ? null : activeCategory?.id ?? null;
+
       if (source === "manual") {
         setIsFetching(true);
       } else {
         setIsLiveSyncing(true);
       }
 
-      const [booksResult, categoriesResult, historyResult] = await Promise.all([
-        supabase
-          .from("books")
-          .select(
-            "id,isbn,title,subtitle,description,publisher,language,publication_year,publication_date,cover_image_url,available_copies,total_copies,tags,book_copies(status),book_categories(category_id,categories(id,name)),book_authors(author_id,authors(id,name))",
-          )
-          .order("title", { ascending: true })
-          .limit(300),
+      let booksQuery = supabase
+        .from("books")
+        .select(activeCategoryId ? CATEGORY_BOOK_SELECT : BOOK_SELECT)
+        .order("title", { ascending: true });
+
+      if (activeCategoryId) {
+        booksQuery = booksQuery.eq("book_categories.category_id", activeCategoryId);
+      }
+
+      const [
+        booksResult,
+        categoriesResult,
+        countRowsResult,
+        totalBooksResult,
+        historyResult,
+      ] = await Promise.all([
+        booksQuery.range(from, to),
         supabase
           .from("categories")
           .select("id,name")
           .order("name", { ascending: true }),
+        supabase
+          .from("book_categories")
+          .select("category_id,categories(id,name),books(available_copies)"),
+        supabase.from("books").select("id", { count: "exact", head: true }),
         supabase
           .from("reservations")
           .select("book_id,status")
@@ -392,8 +466,16 @@ export default function CategoryPage() {
           ]),
       ]);
 
+      if (requestId !== dataRequestIdRef.current) {
+        return;
+      }
+
       const firstError =
-        booksResult.error ?? categoriesResult.error ?? historyResult.error;
+        booksResult.error ??
+        categoriesResult.error ??
+        countRowsResult.error ??
+        totalBooksResult.error ??
+        historyResult.error;
       if (firstError) {
         setNotice({ type: "error", text: firstError.message });
         if (source === "manual") {
@@ -406,10 +488,24 @@ export default function CategoryPage() {
 
       const reservationHistory = (historyResult.data ??
         []) as ReservationHistoryRow[];
-      setBooks(
-        ((booksResult.data ?? []) as RawBookRecord[]).map(normalizeBook),
+      const nextBooks = ((booksResult.data ?? []) as RawBookRecord[]).map(
+        normalizeBook,
       );
+      setBooks((previous) => {
+        if (page === 0) return nextBooks;
+        const merged = new Map(previous.map((book) => [book.id, book]));
+        for (const book of nextBooks) merged.set(book.id, book);
+        return Array.from(merged.values());
+      });
+      setCatalogPage(page);
+      setHasMoreBooks(nextBooks.length === CATEGORY_PAGE_SIZE);
       setCategories((categoriesResult.data ?? []) as CategoryRow[]);
+      setCategoryCounts(
+        normalizeCategoryCountRows(
+          (countRowsResult.data ?? []) as CategoryCountRow[],
+        ),
+      );
+      setTotalBooksCount(totalBooksResult.count ?? nextBooks.length);
       setReservedBookIds(
         new Set(
           reservationHistory
@@ -445,13 +541,15 @@ export default function CategoryPage() {
         setIsLiveSyncing(false);
       }
     },
-    [session?.user.id],
+    [selectedCategory, session?.user.id],
   );
 
   useEffect(() => {
     if (!session?.user.id) return;
-    void loadData("manual");
-  }, [loadData, session?.user.id]);
+    setBooks([]);
+    setCatalogPage(0);
+    void loadData("manual", 0);
+  }, [loadData, selectedCategory, session?.user.id]);
 
   useEffect(() => {
     if (!session?.user.id || !hasSupabaseEnv) return;
@@ -459,8 +557,8 @@ export default function CategoryPage() {
     const queueLiveRefresh = () => {
       if (refreshTimeout) window.clearTimeout(refreshTimeout);
       refreshTimeout = window.setTimeout(() => {
-        void loadData("live");
-      }, 320);
+        void loadData("live", 0);
+      }, 600);
     };
     const channel = supabase
       .channel(`category-realtime-${session.user.id}`)
@@ -477,16 +575,6 @@ export default function CategoryPage() {
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "book_authors" },
-        queueLiveRefresh,
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "categories" },
-        queueLiveRefresh,
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "authors" },
         queueLiveRefresh,
       )
       .on(
@@ -512,33 +600,7 @@ export default function CategoryPage() {
       setSelectedCategory("all");
   }, [categories, selectedCategory]);
 
-  const categoryCounts = useMemo(() => {
-    const counts = new Map<string, { total: number; available: number }>();
-    for (const category of categories)
-      counts.set(category.name, { total: 0, available: 0 });
-    for (const book of books) {
-      for (const category of new Set(book.categories)) {
-        const v = counts.get(category) ?? { total: 0, available: 0 };
-        v.total += 1;
-        if (getAvailabilityState(book) === "available") v.available += 1;
-        counts.set(category, v);
-      }
-    }
-    return Array.from(counts.entries())
-      .filter(([, v]) => v.total > 0)
-      .map(([name, v]) => ({
-        id: categories.find((c) => c.name === name)?.id ?? name,
-        name,
-        count: v.total,
-        availableCount: v.available,
-      }))
-      .sort((l, r) => r.count - l.count || l.name.localeCompare(r.name));
-  }, [books, categories]);
-
-  const filteredBooks = useMemo(() => {
-    if (selectedCategory === "all") return books;
-    return books.filter((book) => book.categories.includes(selectedCategory));
-  }, [books, selectedCategory]);
+  const filteredBooks = useMemo(() => books, [books]);
 
   const selectedCategorySummary = useMemo(() => {
     if (selectedCategory === "all")
@@ -608,13 +670,13 @@ export default function CategoryPage() {
         onMarkAllRead: notifier.markAllAsRead,
       }}
       sidebarStats={[
-        { label: "Books", value: String(books.length) },
+        { label: "Books", value: String(totalBooksCount || books.length) },
         { label: "Categories", value: String(categoryCounts.length) },
       ]}
       sidebarAction={{
         label: isFetching ? "Refreshing..." : "Refresh Data",
         onClick: () => {
-          void loadData("manual");
+          void loadData("manual", 0);
         },
         disabled: isFetching,
       }}
@@ -664,7 +726,9 @@ export default function CategoryPage() {
               >
                 All
               </span>
-              <span className="text-[11px] text-slate-400">{books.length}</span>
+              <span className="text-[11px] text-slate-400">
+                {totalBooksCount || books.length}
+              </span>
               <span className="sr-only">All categories</span>
             </button>
             {categoryCounts.map((entry) => (
@@ -766,6 +830,20 @@ export default function CategoryPage() {
               })}
             </div>
           )}
+          {hasMoreBooks ? (
+            <div className="mt-5 flex justify-center">
+              <button
+                type="button"
+                className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-emerald-200 hover:text-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={isFetching}
+                onClick={() => {
+                  void loadData("manual", catalogPage + 1);
+                }}
+              >
+                {isFetching ? "Loading..." : "Load more books"}
+              </button>
+            </div>
+          ) : null}
         </section>
       </div>
       {reservationBook ? (
@@ -778,7 +856,7 @@ export default function CategoryPage() {
           onComplete={async (bookId, _status, message) => {
             setReservedBookIds((previous) => new Set([...previous, bookId]));
             setReservationBook(null);
-            await loadData("live");
+            await loadData("live", 0);
             setNotice({ type: "success", text: message });
           }}
         />

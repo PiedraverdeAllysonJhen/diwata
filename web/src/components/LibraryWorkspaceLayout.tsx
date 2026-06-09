@@ -193,6 +193,10 @@ export default function LibraryWorkspaceLayout({
               <img
                 src="/assets/bookitstudent-logo.jpg"
                 alt="BookItStudent logo"
+                width="48"
+                height="48"
+                loading="eager"
+                decoding="async"
               />
               <div>
                 <h2>BookItStudent</h2>

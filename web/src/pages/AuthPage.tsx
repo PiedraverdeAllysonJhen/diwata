@@ -439,6 +439,10 @@ export default function AuthPage() {
                 src="/assets/bookitstudent-logo.jpg"
                 alt="BookItStudent cover logo"
                 className="cover-logo"
+                width="72"
+                height="72"
+                decoding="async"
+                fetchPriority="high"
               />
               <span className="cover-divider" aria-hidden="true" />
               <div className="cover-heading">
@@ -473,6 +477,9 @@ export default function AuthPage() {
                 src="/assets/bookitstudent-logo.jpg"
                 alt="BookItStudent - Visayas State University"
                 className="brand-logo"
+                width="86"
+                height="86"
+                decoding="async"
               />
               <span className="brand-divider" aria-hidden="true" />
               <div className="brand-heading">

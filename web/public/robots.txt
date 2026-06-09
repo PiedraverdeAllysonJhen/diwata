@@ -1,0 +1,12 @@
+User-agent: *
+Allow: /
+Disallow: /dashboard
+Disallow: /search
+Disallow: /category
+Disallow: /favorites
+Disallow: /reservations
+Disallow: /settings
+Disallow: /help
+Disallow: /books/
+Disallow: /admin
+Disallow: /admin-
