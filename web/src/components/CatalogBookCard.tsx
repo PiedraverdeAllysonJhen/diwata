@@ -82,7 +82,7 @@ export default function CatalogBookCard({
 
   return (
     <article
-      className="group relative flex h-full cursor-pointer flex-col overflow-hidden rounded-[1.35rem] border border-slate-200 bg-white shadow-[0_16px_36px_rgba(15,23,42,0.08)] transition duration-200 hover:-translate-y-0.5 hover:border-emerald-200 hover:shadow-[0_22px_44px_rgba(15,23,42,0.11)]"
+      className="catalog-book-card group relative flex h-full min-h-[29rem] cursor-pointer flex-col overflow-hidden rounded-[1.35rem] border border-slate-200 bg-white shadow-[0_16px_36px_rgba(15,23,42,0.08)] transition duration-200 hover:-translate-y-0.5 hover:border-emerald-200 hover:shadow-[0_22px_44px_rgba(15,23,42,0.11)]"
       role="button"
       tabIndex={0}
       onClick={onOpenDetails}
@@ -90,13 +90,16 @@ export default function CatalogBookCard({
     >
       {/* Cover — overlay gradient removed for crisp, sharp jacket display */}
       <div
-        className={`relative h-48 overflow-hidden bg-gradient-to-br ${toneClasses}`}
+        className={`relative h-48 shrink-0 overflow-hidden bg-gradient-to-br ${toneClasses}`}
       >
         {coverImageUrl ? (
           <img
             src={coverImageUrl}
             alt={`${title} cover`}
             loading="lazy"
+            decoding="async"
+            width="320"
+            height="480"
             className="absolute inset-0 h-full w-full object-cover"
           />
         ) : (

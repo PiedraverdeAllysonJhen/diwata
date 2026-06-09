@@ -183,6 +183,9 @@ function FavoriteBookCard({
               src={entry.book.cover_image_url}
               alt={`${entry.book.title} cover`}
               loading="lazy"
+              decoding="async"
+              width="112"
+              height="168"
               className="absolute inset-0 w-full h-full object-cover"
             />
           ) : (

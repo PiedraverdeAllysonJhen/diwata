@@ -239,6 +239,9 @@ function LibraryHistoryCard({ item }: { item: LibraryBookItem }) {
               src={item.coverImageUrl}
               alt={`${item.title} cover`}
               loading="lazy"
+              decoding="async"
+              width="160"
+              height="240"
               className="absolute inset-0 h-full w-full object-cover"
             />
             <div className="absolute inset-0 bg-gradient-to-b from-slate-950/5 via-slate-950/15 to-slate-950/35" />

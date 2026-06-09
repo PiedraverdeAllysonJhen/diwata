@@ -3,6 +3,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { Session } from "@supabase/supabase-js";
@@ -90,6 +91,10 @@ type ReservationHistoryRow = {
 type FilterAvailability = "all" | "available" | "borrowed" | "reserved";
 type LoadSource = "manual" | "live";
 type AvailabilityState = Exclude<FilterAvailability, "all">;
+
+const CATALOG_PAGE_SIZE = 32;
+const BOOK_SELECT =
+  "id,isbn,title,subtitle,description,publisher,language,publication_year,publication_date,cover_image_url,available_copies,total_copies,created_at,tags,book_copies(status),book_categories(category_id,categories(id,name)),book_authors(author_id,authors(id,name))";
 
 function normalizeCategories(
   relations: RawCategoryRelation[] | null,
@@ -179,11 +184,52 @@ function getAvailabilityRank(status: AvailabilityState) {
   return 1;
 }
 
+function escapeIlike(value: string) {
+  return value.replace(/[%_]/g, (match) => `\\${match}`);
+}
+
+function uniqueIds(rows: Array<{ book_id: string | null }>) {
+  return Array.from(
+    new Set(rows.map((row) => row.book_id).filter((id): id is string => Boolean(id))),
+  );
+}
+
 function formatLastSync(value: string | null) {
   if (!value) return "Waiting for first sync";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "Waiting for first sync";
   return `Last sync ${date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", second: "2-digit" })}`;
+}
+
+function BookCardSkeletonGrid({
+  count,
+  variant = "results",
+}: {
+  count: number;
+  variant?: "feature" | "results";
+}) {
+  const gridClass =
+    variant === "feature"
+      ? "grid gap-4 md:grid-cols-2 xl:grid-cols-4"
+      : "grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5";
+  return (
+    <div className={gridClass} aria-hidden="true">
+      {Array.from({ length: count }, (_, i) => (
+        <div
+          key={i}
+          className="min-h-[29rem] animate-pulse overflow-hidden rounded-[1.35rem] border border-slate-100 bg-white"
+        >
+          <div className="h-48 bg-slate-100" />
+          <div className="grid gap-3 p-3.5">
+            <div className="h-4 w-3/4 rounded bg-slate-100" />
+            <div className="h-3 w-1/2 rounded bg-slate-100" />
+            <div className="h-3 w-5/6 rounded bg-slate-100" />
+            <div className="mt-5 h-9 rounded-xl bg-slate-100" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 export default function SearchPage() {
@@ -195,6 +241,8 @@ export default function SearchPage() {
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
   const [books, setBooks] = useState<SearchBook[]>([]);
+  const [catalogPage, setCatalogPage] = useState(0);
+  const [hasMoreBooks, setHasMoreBooks] = useState(false);
   const [reservedBookIds, setReservedBookIds] = useState<Set<string>>(
     new Set(),
   );
@@ -212,6 +260,7 @@ export default function SearchPage() {
   const [reservationBook, setReservationBook] = useState<SearchBook | null>(
     null,
   );
+  const catalogRequestIdRef = useRef(0);
 
   useEffect(() => {
     let isMounted = true;
@@ -248,22 +297,92 @@ export default function SearchPage() {
   }, [navigate]);
 
   const loadCatalog = useCallback(
-    async (source: LoadSource = "manual") => {
+    async (source: LoadSource = "manual", page = 0) => {
       if (!session?.user.id) return;
+      const requestId = catalogRequestIdRef.current + 1;
+      catalogRequestIdRef.current = requestId;
+      const from = page * CATALOG_PAGE_SIZE;
+      const to = from + CATALOG_PAGE_SIZE - 1;
+      const keyword = searchQuery.trim();
+      const escapedKeyword = escapeIlike(keyword);
+
       if (source === "manual") {
         setIsFetching(true);
       } else {
         setIsLiveSyncing(true);
       }
 
+      const [authorMatchResult, categoryMatchResult] = keyword
+        ? await Promise.all([
+            supabase
+              .from("book_authors")
+              .select("book_id,authors!inner(name)")
+              .ilike("authors.name", `%${escapedKeyword}%`)
+              .limit(200),
+            supabase
+              .from("book_categories")
+              .select("book_id,categories!inner(name)")
+              .ilike("categories.name", `%${escapedKeyword}%`)
+              .limit(200),
+          ])
+        : [
+            { data: [], error: null },
+            { data: [], error: null },
+          ];
+
+      if (requestId !== catalogRequestIdRef.current) {
+        return;
+      }
+
+      const relationSearchError =
+        authorMatchResult.error ?? categoryMatchResult.error;
+      if (relationSearchError) {
+        setNotice(relationSearchError.message);
+        if (source === "manual") setIsFetching(false);
+        else setIsLiveSyncing(false);
+        return;
+      }
+
+      const relationBookIds = uniqueIds([
+        ...((authorMatchResult.data ?? []) as Array<{ book_id: string | null }>),
+        ...((categoryMatchResult.data ?? []) as Array<{ book_id: string | null }>),
+      ]);
+
+      let booksQuery = supabase
+        .from("books")
+        .select(BOOK_SELECT)
+        .order("title", { ascending: true });
+
+      if (keyword) {
+        const textFilters = [
+          `title.ilike.%${escapedKeyword}%`,
+          `subtitle.ilike.%${escapedKeyword}%`,
+          `description.ilike.%${escapedKeyword}%`,
+          `publisher.ilike.%${escapedKeyword}%`,
+          `language.ilike.%${escapedKeyword}%`,
+          `isbn.ilike.%${escapedKeyword}%`,
+        ];
+        if (relationBookIds.length > 0) {
+          textFilters.push(`id.in.(${relationBookIds.join(",")})`);
+        }
+        booksQuery = booksQuery.or(textFilters.join(","));
+      }
+
+      if (selectedLanguage !== "all") {
+        booksQuery = booksQuery.eq("language", selectedLanguage);
+      }
+
+      if (availabilityFilter === "available") {
+        booksQuery = booksQuery.gt("available_copies", 0);
+      } else if (
+        availabilityFilter === "borrowed" ||
+        availabilityFilter === "reserved"
+      ) {
+        booksQuery = booksQuery.eq("available_copies", 0);
+      }
+
       const [booksResult, historyResult] = await Promise.all([
-        supabase
-          .from("books")
-          .select(
-            "id,isbn,title,subtitle,description,publisher,language,publication_year,publication_date,cover_image_url,available_copies,total_copies,created_at,tags,book_copies(status),book_categories(category_id,categories(id,name)),book_authors(author_id,authors(id,name))",
-          )
-          .order("title", { ascending: true })
-          .limit(300),
+        booksQuery.range(from, to),
         supabase
           .from("reservations")
           .select("book_id,status")
@@ -281,6 +400,10 @@ export default function SearchPage() {
           ]),
       ]);
 
+      if (requestId !== catalogRequestIdRef.current) {
+        return;
+      }
+
       const firstError = booksResult.error ?? historyResult.error;
       if (firstError) {
         setNotice(firstError.message);
@@ -294,9 +417,17 @@ export default function SearchPage() {
 
       const reservationHistory = (historyResult.data ??
         []) as ReservationHistoryRow[];
-      setBooks(
-        ((booksResult.data ?? []) as RawBookRecord[]).map(normalizeBook),
+      const nextBooks = ((booksResult.data ?? []) as RawBookRecord[]).map(
+        normalizeBook,
       );
+      setBooks((previous) => {
+        if (page === 0) return nextBooks;
+        const merged = new Map(previous.map((book) => [book.id, book]));
+        for (const book of nextBooks) merged.set(book.id, book);
+        return Array.from(merged.values());
+      });
+      setCatalogPage(page);
+      setHasMoreBooks(nextBooks.length === CATALOG_PAGE_SIZE);
       setReservedBookIds(
         new Set(
           reservationHistory
@@ -337,8 +468,14 @@ export default function SearchPage() {
 
   useEffect(() => {
     if (!session?.user.id) return;
-    void loadCatalog("manual");
-  }, [loadCatalog, session?.user.id]);
+    void loadCatalog("manual", 0);
+  }, [
+    availabilityFilter,
+    loadCatalog,
+    searchQuery,
+    selectedLanguage,
+    session?.user.id,
+  ]);
 
   useEffect(() => {
     if (!session?.user.id || !hasSupabaseEnv) return;
@@ -346,8 +483,8 @@ export default function SearchPage() {
     const queueLiveRefresh = () => {
       if (refreshTimeout) window.clearTimeout(refreshTimeout);
       refreshTimeout = window.setTimeout(() => {
-        void loadCatalog("live");
-      }, 320);
+        void loadCatalog("live", 0);
+      }, 600);
     };
     const channel = supabase
       .channel(`search-realtime-${session.user.id}`)
@@ -369,16 +506,6 @@ export default function SearchPage() {
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "book_authors" },
-        queueLiveRefresh,
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "categories" },
-        queueLiveRefresh,
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "authors" },
         queueLiveRefresh,
       )
       .on(
@@ -406,34 +533,7 @@ export default function SearchPage() {
     return Array.from(values).sort((l, r) => l.localeCompare(r));
   }, [books]);
 
-  const filteredBooks = useMemo(() => {
-    const keyword = searchQuery.trim().toLowerCase();
-    return books.filter((book) => {
-      const availability = getAvailabilityState(book);
-      if (selectedLanguage !== "all" && book.language !== selectedLanguage)
-        return false;
-      if (!matchesAvailability(availabilityFilter, availability)) return false;
-      if (!keyword) return true;
-      return [
-        book.title,
-        book.subtitle ?? "",
-        book.description ?? "",
-        book.publisher ?? "",
-        book.language ?? "",
-        book.publicationDate ?? "",
-        book.publicationYear ? String(book.publicationYear) : "",
-        book.isbn ?? "",
-        book.tags.join(" "),
-        book.categories.join(" "),
-        book.authors.join(" "),
-      ].some((v) => v.toLowerCase().includes(keyword));
-    });
-  }, [
-    availabilityFilter,
-    books,
-    searchQuery,
-    selectedLanguage,
-  ]);
+  const filteredBooks = useMemo(() => books, [books]);
 
   const featuredBooks = useMemo(() => {
     return [...books]
@@ -466,6 +566,8 @@ export default function SearchPage() {
 
   const handleSearchSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    setCatalogPage(0);
+    setBooks([]);
     setSearchQuery(searchInput.trim());
   };
 
@@ -532,7 +634,7 @@ export default function SearchPage() {
       sidebarAction={{
         label: isFetching ? "Refreshing..." : "Refresh Data",
         onClick: () => {
-          void loadCatalog("manual");
+          void loadCatalog("manual", 0);
         },
         disabled: isFetching,
       }}
@@ -578,7 +680,11 @@ export default function SearchPage() {
               </span>
               <select
                 value={selectedLanguage}
-                onChange={(e) => setSelectedLanguage(e.target.value)}
+                onChange={(e) => {
+                  setSelectedLanguage(e.target.value);
+                  setCatalogPage(0);
+                  setBooks([]);
+                }}
                 className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-emerald-300 focus:bg-white"
               >
                 <option value="all">All languages</option>
@@ -596,7 +702,11 @@ export default function SearchPage() {
               <select
                 value={availabilityFilter}
                 onChange={(e) =>
-                  setAvailabilityFilter(e.target.value as FilterAvailability)
+                  {
+                    setAvailabilityFilter(e.target.value as FilterAvailability);
+                    setCatalogPage(0);
+                    setBooks([]);
+                  }
                 }
                 className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-emerald-300 focus:bg-white"
               >
@@ -630,8 +740,11 @@ export default function SearchPage() {
                 </p>
               </div>
             </div>
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-              {newBooks.map((book) => {
+            {isFetching && books.length === 0 ? (
+              <BookCardSkeletonGrid count={4} variant="feature" />
+            ) : (
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                {newBooks.map((book) => {
                 const availability = getAvailabilityState(book);
                 const isReserved = reservedBookIds.has(book.id);
                 const isSaving = activeReserveBookId === book.id;
@@ -667,8 +780,9 @@ export default function SearchPage() {
                     }}
                   />
                 );
-              })}
-            </div>
+                })}
+              </div>
+            )}
           </section>
         ) : null}
 
@@ -694,8 +808,11 @@ export default function SearchPage() {
                 Open category page
               </button>
             </div>
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-              {featuredBooks.map((book) => {
+            {isFetching && books.length === 0 ? (
+              <BookCardSkeletonGrid count={8} variant="feature" />
+            ) : (
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                {featuredBooks.map((book) => {
                 const availability = getAvailabilityState(book);
                 const isReserved = reservedBookIds.has(book.id);
                 const isSaving = activeReserveBookId === book.id;
@@ -740,8 +857,9 @@ export default function SearchPage() {
                     }}
                   />
                 );
-              })}
-            </div>
+                })}
+              </div>
+            )}
           </section>
         ) : null}
 
@@ -759,19 +877,12 @@ export default function SearchPage() {
               </p>
             </div>
             <p className="text-sm font-medium text-slate-500">
-              {filteredBooks.length} books
+              {filteredBooks.length} matching books loaded
             </p>
           </div>
 
           {isFetching && books.length === 0 ? (
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">
-              {Array.from({ length: 10 }, (_, i) => (
-                <div
-                  key={i}
-                  className="animate-pulse rounded-[1.35rem] border border-slate-100 bg-slate-100 h-72"
-                />
-              ))}
-            </div>
+            <BookCardSkeletonGrid count={10} />
           ) : filteredBooks.length === 0 ? (
             <div className="rounded-[1.6rem] border border-dashed border-slate-200 bg-slate-50 px-5 py-10 text-center text-sm text-slate-500">
               No books match the current search and filter combination.
@@ -826,6 +937,20 @@ export default function SearchPage() {
               })}
             </div>
           )}
+          {hasMoreBooks ? (
+            <div className="mt-5 flex justify-center">
+              <button
+                type="button"
+                className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-emerald-200 hover:text-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={isFetching}
+                onClick={() => {
+                  void loadCatalog("manual", catalogPage + 1);
+                }}
+              >
+                {isFetching ? "Loading..." : "Load more books"}
+              </button>
+            </div>
+          ) : null}
         </section>
       </div>
       {reservationBook ? (
@@ -838,7 +963,7 @@ export default function SearchPage() {
           onComplete={async (bookId, _status, message) => {
             setReservedBookIds((previous) => new Set([...previous, bookId]));
             setReservationBook(null);
-            await loadCatalog("live");
+            await loadCatalog("live", 0);
             setNotice(message);
           }}
         />
