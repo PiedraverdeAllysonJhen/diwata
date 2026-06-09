@@ -300,16 +300,6 @@ export default function HelpPage() {
         },
         disabled: isFetching
       }}
-      headerActions={
-        <div className="discover-inline-actions">
-          <button type="button" className="btn btn-soft btn-small" onClick={() => navigate("/dashboard")}>
-            Open Dashboard
-          </button>
-          <button type="button" className="btn btn-soft btn-small" onClick={() => navigate("/settings")}>
-            Open Settings
-          </button>
-        </div>
-      }
       statusBar={
         <PortalLiveIndicator
           isSyncing={isLiveSyncing}
@@ -323,7 +313,7 @@ export default function HelpPage() {
       <div className="space-y-5">
         <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3" aria-label="Help overview">
           <MetricCard
-            label="Open Reservations"
+            label="Active Reservations"
             value={String(metrics.activeReservations)}
             description="Requests that still need your attention in the reservations workspace."
           />
@@ -351,7 +341,7 @@ export default function HelpPage() {
               <div className="mt-5 grid grid-cols-1 gap-4">
                 <QuickLinkCard
                   title="Manage reservations"
-                  actionLabel="Open reservations"
+                  actionLabel="View reservations"
                   onClick={() => navigate("/reservations")}
                   icon={
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5">
@@ -364,7 +354,7 @@ export default function HelpPage() {
 
                 <QuickLinkCard
                   title="Check saved books"
-                  actionLabel="Open favorites"
+                  actionLabel="View favorites"
                   onClick={() => navigate("/favorites")}
                   icon={
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5">
@@ -377,7 +367,7 @@ export default function HelpPage() {
 
                 <QuickLinkCard
                   title="Review alerts"
-                  actionLabel="Open alerts"
+                  actionLabel="View alerts"
                   onClick={notifier.toggleOpen}
                   icon={
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5">
@@ -410,7 +400,7 @@ export default function HelpPage() {
               />
               <HelpAccordion
                 title="Where can I update my profile details?"
-                answer="Open Settings, expand the profile module, update your details, and use the single save action to store profile and preference changes together."
+                answer="Use Settings, expand the profile module, update your details, and use the single save action to store profile changes."
               />
               <HelpAccordion
                 title="How do I contact support?"

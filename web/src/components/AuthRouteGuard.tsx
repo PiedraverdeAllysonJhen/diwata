@@ -12,6 +12,28 @@ type GuardState = {
   redirectTo: string | null;
 };
 
+const ACCESS_CHECK_TIMEOUT_MS = 6000;
+
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+): Promise<T | null> {
+  let timeoutId: ReturnType<typeof window.setTimeout> | undefined;
+
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<null>((resolve) => {
+        timeoutId = window.setTimeout(() => resolve(null), timeoutMs);
+      }),
+    ]);
+  } catch {
+    return null;
+  } finally {
+    if (timeoutId) window.clearTimeout(timeoutId);
+  }
+}
+
 function LoadingScreen({ label }: { label: string }) {
   return (
     <main className="portal-page">
@@ -54,11 +76,14 @@ export default function AuthRouteGuard({
         return;
       }
 
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
+      const sessionResult = await withTimeout(
+        supabase.auth.getSession(),
+        ACCESS_CHECK_TIMEOUT_MS,
+      );
 
       if (!isMounted) return;
+
+      const session = sessionResult?.data.session ?? null;
 
       if (!session) {
         setState({
@@ -70,16 +95,29 @@ export default function AuthRouteGuard({
         return;
       }
 
-      const staff = await isStaffUser(session.user.id);
+      const staff = Boolean(
+        await withTimeout(
+          isStaffUser(session.user.id),
+          ACCESS_CHECK_TIMEOUT_MS,
+        ),
+      );
       if (!isMounted) return;
+
+      const guestRedirect =
+        mode === "guest"
+          ? ((await withTimeout(
+              getPostLoginPath(session.user.id),
+              ACCESS_CHECK_TIMEOUT_MS,
+            )) ?? "/dashboard")
+          : null;
 
       setState({
         isLoading: false,
         isAuthenticated: true,
         isStaff: staff,
         redirectTo:
-          mode === "guest"
-            ? await getPostLoginPath(session.user.id)
+          guestRedirect
+            ? guestRedirect
             : mode === "admin" && !staff
               ? "/dashboard"
               : mode === "student" && staff

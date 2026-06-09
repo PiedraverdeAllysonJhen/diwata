@@ -406,16 +406,6 @@ export default function ReservationsPage() {
         },
         disabled: isFetching
       }}
-      headerActions={
-        <div className="discover-inline-actions">
-          <button type="button" className="btn btn-soft btn-small" onClick={() => navigate("/search")}>
-            Open Discover
-          </button>
-          <button type="button" className="btn btn-soft btn-small" onClick={() => navigate("/dashboard")}>
-            Open Dashboard
-          </button>
-        </div>
-      }
       statusBar={
         <PortalLiveIndicator
           isSyncing={isLiveSyncing}

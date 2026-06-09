@@ -844,31 +844,6 @@ export default function BookDetailsPage() {
         },
         disabled: isFetching,
       }}
-      headerActions={
-        <div className="discover-inline-actions">
-          <button
-            type="button"
-            className="btn btn-soft btn-small"
-            onClick={() => navigate("/search")}
-          >
-            Open Discover
-          </button>
-          <button
-            type="button"
-            className="btn btn-soft btn-small"
-            onClick={() => navigate("/reservations")}
-          >
-            Open Reservations
-          </button>
-          <button
-            type="button"
-            className="btn btn-soft btn-small"
-            onClick={() => navigate("/favorites")}
-          >
-            Open Favorites
-          </button>
-        </div>
-      }
       statusBar={
         <PortalLiveIndicator
           isSyncing={isLiveSyncing}

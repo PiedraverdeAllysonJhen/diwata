@@ -52,33 +52,33 @@ const DEFAULT_PROFILE: ProfileForm = {
   course: "",
 };
 
+const SETTINGS_BOOTSTRAP_TIMEOUT_MS = 6000;
+
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+): Promise<T | null> {
+  let timeoutId: ReturnType<typeof window.setTimeout> | undefined;
+
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<null>((resolve) => {
+        timeoutId = window.setTimeout(() => resolve(null), timeoutMs);
+      }),
+    ]);
+  } catch {
+    return null;
+  } finally {
+    if (timeoutId) window.clearTimeout(timeoutId);
+  }
+}
+
 function formatLastSync(value: string | null) {
   if (!value) return "Waiting for first sync";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "Waiting for first sync";
   return `Last sync ${date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", second: "2-digit" })}`;
-}
-
-function MetricCard({
-  description,
-  label,
-  value,
-}: {
-  description: string;
-  label: string;
-  value: string;
-}) {
-  return (
-    <article className="rounded-[1.35rem] border border-slate-200 bg-white/95 p-4 shadow-[0_16px_36px_rgba(15,23,42,0.06)]">
-      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-        {label}
-      </p>
-      <strong className="mt-3 block text-3xl font-semibold tracking-tight text-slate-900">
-        {value}
-      </strong>
-      <p className="mt-2 text-sm text-slate-500">{description}</p>
-    </article>
-  );
 }
 
 function SettingsAccordion({
@@ -126,34 +126,6 @@ function SettingsAccordion({
   );
 }
 
-function PreferenceBullet({
-  children,
-  title,
-}: {
-  children: ReactNode;
-  title: string;
-}) {
-  return (
-    <li className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3">
-      <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white text-emerald-700 shadow-sm">
-        <svg
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.8"
-          className="h-4 w-4"
-        >
-          <path d="m5 12 4 4L19 6" />
-        </svg>
-      </span>
-      <div>
-        <p className="text-sm font-semibold text-slate-900">{title}</p>
-        <p className="mt-1 text-sm text-slate-500">{children}</p>
-      </div>
-    </li>
-  );
-}
-
 export default function SettingsPage() {
   const navigate = useNavigate();
   const [session, setSession] = useState<Session | null>(null);
@@ -185,10 +157,12 @@ export default function SettingsPage() {
         setIsBootstrapping(false);
         return;
       }
-      const {
-        data: { session: currentSession },
-      } = await supabase.auth.getSession();
+      const sessionResult = await withTimeout(
+        supabase.auth.getSession(),
+        SETTINGS_BOOTSTRAP_TIMEOUT_MS,
+      );
       if (!isMounted) return;
+      const currentSession = sessionResult?.data.session ?? null;
       if (!currentSession) {
         navigate("/", { replace: true });
         return;
@@ -221,49 +195,57 @@ export default function SettingsPage() {
         setIsLiveSyncing(true);
       }
 
-      const [settingsResult, profileResult] = await Promise.all([
-        supabase
-          .from("user_settings")
-          .select(
-            "email_notifications_enabled,sms_notifications_enabled,push_notifications_enabled,preferred_language,timezone,theme",
-          )
-          .eq("user_id", session.user.id)
-          .maybeSingle(),
-        supabase
-          .from("user_profiles")
-          .select("first_name,last_name,college,course")
-          .eq("id", session.user.id)
-          .maybeSingle(),
-      ]);
+      try {
+        const [settingsResult, profileResult] = await Promise.all([
+          supabase
+            .from("user_settings")
+            .select(
+              "email_notifications_enabled,sms_notifications_enabled,push_notifications_enabled,preferred_language,timezone,theme",
+            )
+            .eq("user_id", session.user.id)
+            .maybeSingle(),
+          supabase
+            .from("user_profiles")
+            .select("first_name,last_name,college,course")
+            .eq("id", session.user.id)
+            .maybeSingle(),
+        ]);
 
-      if (settingsResult.error) {
-        setNotice({ type: "error", text: settingsResult.error.message });
-      } else {
-        const nextSettings: SettingsForm = {
-          ...DEFAULT_SETTINGS,
-          ...(settingsResult.data ?? {}),
-        };
-        setSettingsForm(nextSettings);
-        setInitialSettings(nextSettings);
-      }
+        if (settingsResult.error) {
+          setNotice({ type: "error", text: settingsResult.error.message });
+        } else {
+          const nextSettings: SettingsForm = {
+            ...DEFAULT_SETTINGS,
+            ...(settingsResult.data ?? {}),
+          };
+          setSettingsForm(nextSettings);
+          setInitialSettings(nextSettings);
+        }
 
-      if (profileResult.error) {
-        setNotice({ type: "error", text: profileResult.error.message });
-      } else {
-        const nextProfile: ProfileForm = {
-          ...DEFAULT_PROFILE,
-          ...(profileResult.data ?? {}),
-        };
-        setProfileForm(nextProfile);
-        setInitialProfile(nextProfile);
-      }
+        if (profileResult.error) {
+          setNotice({ type: "error", text: profileResult.error.message });
+        } else {
+          const nextProfile: ProfileForm = {
+            ...DEFAULT_PROFILE,
+            ...(profileResult.data ?? {}),
+          };
+          setProfileForm(nextProfile);
+          setInitialProfile(nextProfile);
+        }
 
-      if (!settingsResult.error && !profileResult.error) setNotice(null);
-      setLastSyncedAt(new Date().toISOString());
-      if (source === "manual") {
-        setIsFetching(false);
-      } else {
-        setIsLiveSyncing(false);
+        if (!settingsResult.error && !profileResult.error) setNotice(null);
+        setLastSyncedAt(new Date().toISOString());
+      } catch {
+        setNotice({
+          type: "error",
+          text: "Settings could not be loaded. Please refresh and try again.",
+        });
+      } finally {
+        if (source === "manual") {
+          setIsFetching(false);
+        } else {
+          setIsLiveSyncing(false);
+        }
       }
     },
     [session?.user.id],
@@ -378,17 +360,6 @@ export default function SettingsPage() {
     [profileForm.first_name.trim(), profileForm.last_name.trim()]
       .filter(Boolean)
       .join(" ") || userEmail.split("@")[0];
-  const activeAlertsCount =
-    Number(settingsForm.email_notifications_enabled) +
-    Number(settingsForm.push_notifications_enabled) +
-    Number(settingsForm.sms_notifications_enabled);
-  const completedProfileFields = [
-    profileForm.first_name,
-    profileForm.last_name,
-    profileForm.college,
-    profileForm.course,
-  ].filter((v) => v.trim().length > 0).length;
-  const profileCompleteness = Math.round((completedProfileFields / 4) * 100);
   const profileInitial = displayName.trim().charAt(0).toUpperCase() || "S";
 
   if (!hasSupabaseEnv) {
@@ -420,7 +391,7 @@ export default function SettingsPage() {
       activeRoute="settings"
       activeMenuKey="setting"
       title="Account Settings"
-      description="Profile details, notifications, and interface preferences are organized into lighter, easier-to-scan modules."
+      description="Profile details and notifications are organized into lighter, easier-to-scan modules."
       userEmail={userEmail}
       notifier={{
         notifications: notifier.notifications,
@@ -432,7 +403,6 @@ export default function SettingsPage() {
         onMarkAllRead: notifier.markAllAsRead,
       }}
       sidebarStats={[
-        { label: "Theme", value: settingsForm.theme.toUpperCase() },
         {
           label: "Alerts",
           value:
@@ -449,24 +419,6 @@ export default function SettingsPage() {
         },
         disabled: isFetching,
       }}
-      headerActions={
-        <div className="discover-inline-actions">
-          <button
-            type="button"
-            className="btn btn-soft btn-small"
-            onClick={() => navigate("/dashboard")}
-          >
-            Open Dashboard
-          </button>
-          <button
-            type="button"
-            className="btn btn-soft btn-small"
-            onClick={() => navigate("/help")}
-          >
-            Open Help
-          </button>
-        </div>
-      }
       statusBar={
         <PortalLiveIndicator
           isSyncing={isLiveSyncing || isSaving}
@@ -482,32 +434,6 @@ export default function SettingsPage() {
       onSignOut={handleSignOut}
     >
       <form className="space-y-5" onSubmit={handleSave}>
-        <section
-          className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4"
-          aria-label="Settings overview"
-        >
-          <MetricCard
-            label="Profile"
-            value={`${profileCompleteness}%`}
-            description="How complete your academic profile is right now."
-          />
-          <MetricCard
-            label="Enabled Alerts"
-            value={String(activeAlertsCount)}
-            description="Channels currently active for reservation and reminder updates."
-          />
-          <MetricCard
-            label="Language"
-            value={settingsForm.preferred_language.toUpperCase()}
-            description="Your preferred interface language for future content updates."
-          />
-          <MetricCard
-            label="Theme"
-            value={settingsForm.theme.toUpperCase()}
-            description="The active display preference stored with your account."
-          />
-        </section>
-
         <section className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,0.88fr)_minmax(0,1.12fr)]">
           <aside className="space-y-5">
             <section className="rounded-[1.8rem] border border-slate-200 bg-white/95 p-5 shadow-[0_20px_50px_rgba(15,23,42,0.06)]">
@@ -529,41 +455,6 @@ export default function SettingsPage() {
                       .join(" / ") ||
                       "Add your college and course so your account profile feels complete."}
                   </p>
-                </div>
-              </div>
-              <ul className="mt-5 space-y-3">
-                <PreferenceBullet title="Profile data persists">
-                  Name, college, and course save together with your account
-                  record.
-                </PreferenceBullet>
-                <PreferenceBullet title="Preferences stay linked">
-                  Theme, language, and timezone continue to save to the same
-                  user settings row.
-                </PreferenceBullet>
-                <PreferenceBullet title="One save flow">
-                  Use the save bar that appears when you make changes.
-                </PreferenceBullet>
-              </ul>
-            </section>
-
-            <section className="rounded-[1.8rem] border border-slate-200 bg-white/95 p-5 shadow-[0_20px_50px_rgba(15,23,42,0.06)]">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-emerald-700">
-                Current Preferences
-              </p>
-              <div className="mt-3 rounded-[1.2rem] border border-slate-200 bg-slate-50/80 p-4">
-                <p className="text-sm font-semibold text-slate-900">
-                  Active settings
-                </p>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <span className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600">
-                    Theme: {settingsForm.theme}
-                  </span>
-                  <span className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600">
-                    Language: {settingsForm.preferred_language}
-                  </span>
-                  <span className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600">
-                    Timezone: {settingsForm.timezone}
-                  </span>
                 </div>
               </div>
             </section>
@@ -709,94 +600,6 @@ export default function SettingsPage() {
                     </button>
                   );
                 })}
-              </div>
-            </SettingsAccordion>
-
-            <SettingsAccordion
-              title="Interface preferences"
-              summary="Keep visual behavior and locale settings concise, readable, and easy to adjust."
-              icon={
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.8"
-                  className="h-5 w-5"
-                >
-                  <path d="M12 3v3" />
-                  <path d="M12 18v3" />
-                  <path d="m4.9 4.9 2.1 2.1" />
-                  <path d="m17 17 2.1 2.1" />
-                  <path d="M3 12h3" />
-                  <path d="M18 12h3" />
-                  <path d="m4.9 19.1 2.1-2.1" />
-                  <path d="m17 7 2.1-2.1" />
-                  <circle cx="12" cy="12" r="4" />
-                </svg>
-              }
-            >
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-                <label className="flex flex-col gap-2">
-                  <span className="text-sm font-medium text-slate-700">
-                    Preferred language
-                  </span>
-                  <select
-                    value={settingsForm.preferred_language}
-                    onChange={(e) =>
-                      setSettingsForm((p) => ({
-                        ...p,
-                        preferred_language: e.target.value,
-                      }))
-                    }
-                    className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-emerald-300 focus:bg-white"
-                  >
-                    <option value="en">English</option>
-                    <option value="fil">Filipino</option>
-                  </select>
-                  <small className="text-xs text-slate-500">
-                    Stored for future localization support.
-                  </small>
-                </label>
-                <label className="flex flex-col gap-2">
-                  <span className="text-sm font-medium text-slate-700">
-                    Timezone
-                  </span>
-                  <select
-                    value={settingsForm.timezone}
-                    onChange={(e) =>
-                      setSettingsForm((p) => ({
-                        ...p,
-                        timezone: e.target.value,
-                      }))
-                    }
-                    className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-emerald-300 focus:bg-white"
-                  >
-                    <option value="Asia/Manila">Asia/Manila</option>
-                    <option value="UTC">UTC</option>
-                  </select>
-                  <small className="text-xs text-slate-500">
-                    Used for timestamps in account activity.
-                  </small>
-                </label>
-                <label className="flex flex-col gap-2">
-                  <span className="text-sm font-medium text-slate-700">
-                    Theme
-                  </span>
-                  <select
-                    value={settingsForm.theme}
-                    onChange={(e) =>
-                      setSettingsForm((p) => ({ ...p, theme: e.target.value }))
-                    }
-                    className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-emerald-300 focus:bg-white"
-                  >
-                    <option value="system">System</option>
-                    <option value="light">Light</option>
-                    <option value="dark">Dark</option>
-                  </select>
-                  <small className="text-xs text-slate-500">
-                    Maintains your workspace display preference.
-                  </small>
-                </label>
               </div>
             </SettingsAccordion>
 
