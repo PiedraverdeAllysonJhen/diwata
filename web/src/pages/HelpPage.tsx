@@ -6,7 +6,6 @@ import PortalLiveIndicator from "../components/PortalLiveIndicator";
 import LibraryWorkspaceLayout from "../components/LibraryWorkspaceLayout";
 import { useReservationNotifier } from "../hooks/useReservationNotifier";
 
-// FIXED: removed unreadAlerts — now sourced live from notifier hook
 type HelpMetrics = {
   activeReservations: number;
   totalFavorites: number;
@@ -163,7 +162,6 @@ export default function HelpPage() {
         setIsLiveSyncing(true);
       }
 
-      // FIXED: removed broken notifications table query — unreadAlerts now comes
       // from the notifier hook which uses localStorage, matching how it actually works
       const [reservationsResult, favoritesResult] = await Promise.all([
         supabase
@@ -220,7 +218,6 @@ export default function HelpPage() {
       }, 300);
     };
 
-    // FIXED: removed notifications table from channel — that table doesn't exist
     const channel = supabase
       .channel(`help-realtime-${session.user.id}`)
       .on(
@@ -294,7 +291,6 @@ export default function HelpPage() {
       }}
       sidebarStats={[
         { label: "Active Reservations", value: String(metrics.activeReservations) },
-        // FIXED: reads from notifier directly instead of a broken DB query
         { label: "Unread Alerts", value: String(notifier.unreadCount) }
       ]}
       sidebarAction={{
@@ -336,7 +332,6 @@ export default function HelpPage() {
             value={String(metrics.totalFavorites)}
             description="Bookmarked titles you can revisit quickly from the favorites page."
           />
-          {/* FIXED: notifier.unreadCount instead of metrics.unreadAlerts */}
           <MetricCard
             label="Unread Alerts"
             value={String(notifier.unreadCount)}

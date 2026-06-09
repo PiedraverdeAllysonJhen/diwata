@@ -74,11 +74,6 @@ type SearchBook = {
   authors: string[];
 };
 
-type CategoryRow = {
-  id: string;
-  name: string;
-};
-
 type ReservationHistoryRow = {
   book_id: string;
   status:
@@ -96,12 +91,6 @@ type ReservationHistoryRow = {
 type FilterAvailability = "all" | "available" | "borrowed" | "reserved";
 type LoadSource = "manual" | "live";
 type AvailabilityState = Exclude<FilterAvailability, "all">;
-
-type CategoryCount = {
-  id: string;
-  name: string;
-  count: number;
-};
 
 function normalizeCategories(
   relations: RawCategoryRelation[] | null,
@@ -198,126 +187,6 @@ function formatLastSync(value: string | null) {
   return `Last sync ${date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", second: "2-digit" })}`;
 }
 
-function CategoryIcon({ name }: { name: string }) {
-  const normalized = name.toLowerCase();
-  const iconClassName = "h-5 w-5";
-  if (normalized.includes("science") || normalized.includes("research")) {
-    return (
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        className={iconClassName}
-      >
-        <path d="M9 3h6" />
-        <path d="M10 3v5l-5.5 8.8A3 3 0 0 0 7 21h10a3 3 0 0 0 2.5-4.2L14 8V3" />
-        <path d="M8.5 14h7" />
-      </svg>
-    );
-  }
-  if (normalized.includes("history") || normalized.includes("culture")) {
-    return (
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        className={iconClassName}
-      >
-        <path d="M6 4.5A2.5 2.5 0 0 1 8.5 2H20v16.5A2.5 2.5 0 0 0 17.5 16H6Z" />
-        <path d="M6 4.5V22" />
-        <path d="M10 7h6" />
-        <path d="M10 11h6" />
-      </svg>
-    );
-  }
-  if (normalized.includes("technology") || normalized.includes("computer")) {
-    return (
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        className={iconClassName}
-      >
-        <rect x="3" y="4" width="18" height="12" rx="2" />
-        <path d="M8 20h8" />
-        <path d="M12 16v4" />
-      </svg>
-    );
-  }
-  if (
-    normalized.includes("art") ||
-    normalized.includes("design") ||
-    normalized.includes("literature")
-  ) {
-    return (
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        className={iconClassName}
-      >
-        <path d="M12 3c4 0 7 3.4 7 7.4 0 5.2-7 10.6-7 10.6S5 15.6 5 10.4C5 6.4 8 3 12 3Z" />
-        <circle cx="12" cy="10" r="2.2" />
-      </svg>
-    );
-  }
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      className={iconClassName}
-    >
-      <path d="M4 6.5A2.5 2.5 0 0 1 6.5 4H20v13.5A2.5 2.5 0 0 0 17.5 15H4Z" />
-      <path d="M4 6.5V20" />
-      <path d="M9 8h6" />
-      <path d="M9 12h4" />
-    </svg>
-  );
-}
-
-function CategoryIconButton({
-  active,
-  count,
-  name,
-  onClick,
-}: {
-  active: boolean;
-  count: number;
-  name: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-label={name}
-      title={name}
-      className={`relative flex min-h-[112px] w-[100px] flex-col items-center justify-center gap-1.5 rounded-2xl border px-2 py-3 text-center shadow-sm transition hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-emerald-500/25 ${
-        active ? "border-emerald-200 bg-emerald-50" : "border-slate-200 bg-white"
-      }`}
-    >
-      <span
-        className={`flex h-14 w-14 items-center justify-center rounded-2xl transition ${active ? "bg-emerald-700 text-white shadow-lg shadow-emerald-700/25" : "bg-slate-50 text-slate-600"}`}
-      >
-        <CategoryIcon name={name} />
-      </span>
-      <span
-        className={`line-clamp-2 text-xs font-medium ${active ? "text-emerald-700" : "text-slate-600"}`}
-      >
-        {name}
-      </span>
-      <span className="text-[11px] text-slate-400">{count}</span>
-      <span className="sr-only">{name}</span>
-    </button>
-  );
-}
-
 function SectionCard({
   eyebrow,
   title,
@@ -358,7 +227,6 @@ export default function SearchPage() {
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
   const [books, setBooks] = useState<SearchBook[]>([]);
-  const [categories, setCategories] = useState<CategoryRow[]>([]);
   const [reservedBookIds, setReservedBookIds] = useState<Set<string>>(
     new Set(),
   );
@@ -367,7 +235,6 @@ export default function SearchPage() {
   >(new Set());
   const [searchInput, setSearchInput] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedCategory, setSelectedCategory] = useState("all");
   const [selectedLanguage, setSelectedLanguage] = useState("all");
   const [availabilityFilter, setAvailabilityFilter] =
     useState<FilterAvailability>("all");
@@ -421,7 +288,7 @@ export default function SearchPage() {
         setIsLiveSyncing(true);
       }
 
-      const [booksResult, categoriesResult, historyResult] = await Promise.all([
+      const [booksResult, historyResult] = await Promise.all([
         supabase
           .from("books")
           .select(
@@ -429,10 +296,6 @@ export default function SearchPage() {
           )
           .order("title", { ascending: true })
           .limit(300),
-        supabase
-          .from("categories")
-          .select("id,name")
-          .order("name", { ascending: true }),
         supabase
           .from("reservations")
           .select("book_id,status")
@@ -450,8 +313,7 @@ export default function SearchPage() {
           ]),
       ]);
 
-      const firstError =
-        booksResult.error ?? categoriesResult.error ?? historyResult.error;
+      const firstError = booksResult.error ?? historyResult.error;
       if (firstError) {
         setNotice(firstError.message);
         if (source === "manual") {
@@ -467,7 +329,6 @@ export default function SearchPage() {
       setBooks(
         ((booksResult.data ?? []) as RawBookRecord[]).map(normalizeBook),
       );
-      setCategories((categoriesResult.data ?? []) as CategoryRow[]);
       setReservedBookIds(
         new Set(
           reservationHistory
@@ -569,12 +430,6 @@ export default function SearchPage() {
     };
   }, [loadCatalog, session?.user.id]);
 
-  useEffect(() => {
-    if (selectedCategory === "all") return;
-    if (!categories.some((c) => c.name === selectedCategory))
-      setSelectedCategory("all");
-  }, [categories, selectedCategory]);
-
   const allLanguages = useMemo(() => {
     const values = new Set<string>();
     for (const book of books) {
@@ -587,11 +442,6 @@ export default function SearchPage() {
     const keyword = searchQuery.trim().toLowerCase();
     return books.filter((book) => {
       const availability = getAvailabilityState(book);
-      if (
-        selectedCategory !== "all" &&
-        !book.categories.includes(selectedCategory)
-      )
-        return false;
       if (selectedLanguage !== "all" && book.language !== selectedLanguage)
         return false;
       if (!matchesAvailability(availabilityFilter, availability)) return false;
@@ -614,26 +464,8 @@ export default function SearchPage() {
     availabilityFilter,
     books,
     searchQuery,
-    selectedCategory,
     selectedLanguage,
   ]);
-
-  const categoryCounts = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const category of categories) counts.set(category.name, 0);
-    for (const book of books) {
-      for (const category of new Set(book.categories))
-        counts.set(category, (counts.get(category) ?? 0) + 1);
-    }
-    return Array.from(counts.entries())
-      .filter(([, count]) => count > 0)
-      .map(([name, count]) => ({
-        id: categories.find((c) => c.name === name)?.id ?? name,
-        name,
-        count,
-      }))
-      .sort((l, r) => r.count - l.count || l.name.localeCompare(r.name));
-  }, [books, categories]);
 
   const featuredBooks = useMemo(() => {
     return [...books]
@@ -661,7 +493,6 @@ export default function SearchPage() {
 
   const isFocusedBrowse =
     searchQuery.trim().length > 0 ||
-    selectedCategory !== "all" ||
     selectedLanguage !== "all" ||
     availabilityFilter !== "all";
 
@@ -673,7 +504,6 @@ export default function SearchPage() {
   const handleClearBrowse = () => {
     setSearchInput("");
     setSearchQuery("");
-    setSelectedCategory("all");
     setSelectedLanguage("all");
     setAvailabilityFilter("all");
   };
@@ -736,7 +566,7 @@ export default function SearchPage() {
       }}
       sidebarStats={[
         { label: "Books", value: String(books.length) },
-        { label: "Categories", value: String(categoryCounts.length) },
+        { label: "Matches", value: String(filteredBooks.length) },
       ]}
       sidebarAction={{
         label: isFetching ? "Refreshing..." : "Refresh Data",
@@ -763,7 +593,7 @@ export default function SearchPage() {
         <SectionCard
           eyebrow="Library Search"
           title="Browse the collection with less clutter"
-          description="Search and category selection now move you straight into a focused browsing grid."
+          description="Search, language, and availability filters move you straight into a focused browsing grid."
         >
           <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500">
             <span>{filteredBooks.length} matching titles</span>
@@ -841,50 +671,6 @@ export default function SearchPage() {
               Search collection
             </button>
           </form>
-
-          <div className="mt-5 flex flex-wrap gap-3">
-            <button
-              type="button"
-              onClick={() => setSelectedCategory("all")}
-              aria-label="All categories"
-              title="All categories"
-              className={`flex min-h-[112px] w-[100px] flex-col items-center justify-center gap-1.5 rounded-2xl border px-2 py-3 text-center shadow-sm transition hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-emerald-500/25 ${
-                selectedCategory === "all" ? "border-emerald-200 bg-emerald-50" : "border-slate-200 bg-white"
-              }`}
-            >
-              <span
-                className={`flex h-14 w-14 items-center justify-center rounded-2xl transition ${selectedCategory === "all" ? "bg-emerald-700 text-white shadow-lg shadow-emerald-700/25" : "bg-slate-50 text-slate-600"}`}
-              >
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.8"
-                  className="h-5 w-5"
-                >
-                  <path d="M4 6h16" />
-                  <path d="M4 12h16" />
-                  <path d="M4 18h16" />
-                </svg>
-              </span>
-              <span
-                className={`text-xs font-medium ${selectedCategory === "all" ? "text-emerald-700" : "text-slate-600"}`}
-              >
-                All
-              </span>
-              <span className="text-[11px] text-slate-400">{books.length}</span>
-              <span className="sr-only">All categories</span>
-            </button>
-            {categoryCounts.map((entry) => (
-              <CategoryIconButton
-                key={entry.id}
-                active={selectedCategory === entry.name}
-                count={entry.count}
-                name={entry.name}
-                onClick={() => setSelectedCategory(entry.name)}
-              />
-            ))}
-          </div>
         </section>
 
         {!isFocusedBrowse ? (
@@ -1024,9 +810,7 @@ export default function SearchPage() {
                 Focused Results
               </p>
               <h2 className="mt-2 text-xl font-semibold tracking-tight text-slate-900">
-                {selectedCategory === "all"
-                  ? "Browse matching titles"
-                  : `${selectedCategory} collection`}
+                Browse matching titles
               </h2>
               <p className="mt-1 text-sm leading-6 text-slate-500">
                 Clean, badge-driven cards keep the catalog easy to scan.
@@ -1037,7 +821,6 @@ export default function SearchPage() {
             </p>
           </div>
 
-          {/* ADDED: skeleton when first loading — condition guards against empty-filter false positives */}
           {isFetching && books.length === 0 ? (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">
               {Array.from({ length: 10 }, (_, i) => (
@@ -1079,8 +862,7 @@ export default function SearchPage() {
                         book.publicationYear,
                       ),
                       `${book.availableCopies} available of ${book.totalCopies}`,
-                      book.categories.slice(0, 2).join(" / ") ||
-                        "Uncategorized",
+                      book.language ?? "Language not set",
                     ]}
                     actionLabel={
                       isSaving

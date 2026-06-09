@@ -214,7 +214,7 @@ export default function ReservationNotifier({
                 aria-label="Dismiss notification"
                 onClick={() => dismissToast(item.id)}
               >
-                ×
+                x
               </button>
             </article>
           ))}

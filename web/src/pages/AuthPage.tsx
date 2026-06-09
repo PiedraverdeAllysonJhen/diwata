@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { getPostLoginPath } from "../lib/authRouting";
 import { authRedirectBase, hasSupabaseEnv, supabase } from "../lib/supabase";
 
@@ -148,7 +148,6 @@ export default function AuthPage() {
   const [bookState, setBookState] = useState<BookState>("closed");
 
   const dashboardRedirect = `${authRedirectBase}/dashboard`;
-  const resetPasswordRedirect = `${authRedirectBase}/reset-password`;
 
   const passwordScore = useMemo(() => getPasswordScore(password), [password]);
   const renderVisibilityIcon = (isVisible: boolean) =>
@@ -352,96 +351,6 @@ export default function AuthPage() {
           "success",
         );
       }
-    } catch (error) {
-      if (mode === "login") {
-        setFeedback(getLoginErrorMessage(error), "error");
-      } else {
-        setFeedback(getFriendlyError(error), "error");
-      }
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleMagicLink = async () => {
-    if (!hasSupabaseEnv) {
-      setFeedback(
-        "Supabase environment variables are not configured.",
-        "error",
-      );
-      return;
-    }
-
-    const trimmedEmail = email.trim();
-    if (!trimmedEmail) {
-      setFieldError("email", "Please fill all fields.");
-      setFeedback("Please fill all required fields.", "error");
-      return;
-    }
-
-    if (!isValidEmail(trimmedEmail)) {
-      setFieldError("email", "Please enter a valid email address.");
-      setFeedback("Please enter a valid email address.", "error");
-      return;
-    }
-
-    setIsLoading(true);
-
-    try {
-      const { error } = await supabase.auth.signInWithOtp({
-        email: trimmedEmail,
-        options: {
-          emailRedirectTo: dashboardRedirect,
-        },
-      });
-
-      if (error) throw error;
-      setFeedback("Magic link sent. Open your email to continue.", "success");
-    } catch (error) {
-      if (mode === "login") {
-        setFeedback(getLoginErrorMessage(error), "error");
-      } else {
-        setFeedback(getFriendlyError(error), "error");
-      }
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleForgotPassword = async () => {
-    if (!hasSupabaseEnv) {
-      setFeedback(
-        "Supabase environment variables are not configured.",
-        "error",
-      );
-      return;
-    }
-
-    const trimmedEmail = email.trim();
-    if (!trimmedEmail) {
-      setFieldError("email", "Please fill all fields.");
-      setFeedback("Please fill all required fields.", "error");
-      return;
-    }
-
-    if (!isValidEmail(trimmedEmail)) {
-      setFieldError("email", "Please enter a valid email address.");
-      setFeedback("Please enter a valid email address.", "error");
-      return;
-    }
-
-    setIsLoading(true);
-
-    try {
-      const { error } = await supabase.auth.resetPasswordForEmail(
-        trimmedEmail,
-        {
-          redirectTo: resetPasswordRedirect,
-        },
-      );
-
-      if (error) throw error;
-      setFeedback("Password reset link sent to your email.", "success");
     } catch (error) {
       if (mode === "login") {
         setFeedback(getLoginErrorMessage(error), "error");
@@ -799,27 +708,13 @@ export default function AuthPage() {
                         ? "Login"
                         : "Create account"}
                   </button>
-
-                  <button
-                    type="button"
-                    className="btn btn-soft"
-                    onClick={handleMagicLink}
-                    disabled={isLoading}
-                  >
-                    Send Magic Link
-                  </button>
                 </div>
 
                 <div className="auth-links">
                   {mode === "login" && (
-                    <button
-                      type="button"
-                      className="btn btn-link"
-                      onClick={handleForgotPassword}
-                      disabled={isLoading}
-                    >
+                    <Link className="btn btn-link" to="/forgot-password">
                       Forgot password?
-                    </button>
+                    </Link>
                   )}
                   {mode === "signup" && (
                     <button

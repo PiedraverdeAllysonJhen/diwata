@@ -951,12 +951,6 @@ export default function BookDetailsPage() {
                   {book.totalCopies} total
                 </p>
                 <p className="book-details-grid-span-2">
-                  <strong>Categories:</strong>{" "}
-                  {book.categories.length > 0
-                    ? book.categories.join(", ")
-                    : "None"}
-                </p>
-                <p className="book-details-grid-span-2">
                   <strong>Tags:</strong>{" "}
                   {book.tags.length > 0 ? book.tags.join(", ") : "None"}
                 </p>
@@ -968,7 +962,6 @@ export default function BookDetailsPage() {
               </p>
 
               <div className="book-details-actions">
-                {/* FIXED: removed onKeyDown={stopCardAction} — these are standalone buttons, not inside a clickable card */}
                 <button
                   type="button"
                   className="btn btn-primary btn-small"

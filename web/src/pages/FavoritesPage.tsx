@@ -18,14 +18,6 @@ import {
   normalizeAuthors,
 } from "../lib/bookMetadata";
 
-type RawCategoryRelation = {
-  category_id: string;
-  categories:
-    | { id: string; name: string }
-    | { id: string; name: string }[]
-    | null;
-};
-
 type Book = {
   id: string;
   isbn: string | null;
@@ -41,7 +33,6 @@ type Book = {
   total_copies: number;
   tags: string[] | null;
   book_authors: RawAuthorRelation[] | null;
-  book_categories: RawCategoryRelation[] | null;
 };
 
 type BookmarkRow = {
@@ -53,13 +44,7 @@ type BookmarkRow = {
 type FavoriteBook = {
   bookmarkedAt: string;
   book: Book;
-  categories: string[];
   authors: string[];
-};
-
-type FavoriteShelf = {
-  name: string;
-  items: FavoriteBook[];
 };
 
 type ActiveReservation = {
@@ -122,25 +107,6 @@ function getToneClasses(seed: string) {
   return tones[hash % tones.length];
 }
 
-function normalizeCategories(
-  relations: RawCategoryRelation[] | null,
-): string[] {
-  if (!relations || relations.length === 0) return [];
-  const values = new Set<string>();
-  for (const relation of relations) {
-    const categories = relation.categories;
-    if (!categories) continue;
-    if (Array.isArray(categories)) {
-      for (const item of categories) {
-        if (item.name) values.add(item.name);
-      }
-      continue;
-    }
-    if (categories.name) values.add(categories.name);
-  }
-  return Array.from(values).sort((l, r) => l.localeCompare(r));
-}
-
 function onCardKeyDown(
   event: KeyboardEvent<HTMLElement>,
   onActivate: () => void,
@@ -161,7 +127,6 @@ function normalizeBookmarkRows(rows: BookmarkRow[]): FavoriteBook[] {
       return {
         bookmarkedAt: row.created_at,
         book,
-        categories: normalizeCategories(book.book_categories),
         authors: normalizeAuthors(book.book_authors),
       };
     })
@@ -367,7 +332,7 @@ export default function FavoritesPage() {
         supabase
           .from("bookmarks")
           .select(
-            "book_id,created_at,books(id,isbn,title,subtitle,description,publisher,language,publication_year,publication_date,cover_image_url,available_copies,total_copies,tags,book_authors(author_id,authors(id,name)),book_categories(category_id,categories(id,name)))",
+            "book_id,created_at,books(id,isbn,title,subtitle,description,publisher,language,publication_year,publication_date,cover_image_url,available_copies,total_copies,tags,book_authors(author_id,authors(id,name)))",
           )
           .eq("user_id", session.user.id)
           .order("created_at", { ascending: false }),
@@ -459,16 +424,6 @@ export default function FavoritesPage() {
       )
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "book_categories" },
-        queue,
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "categories" },
-        queue,
-      )
-      .on(
-        "postgres_changes",
         { event: "*", schema: "public", table: "book_authors" },
         queue,
       )
@@ -483,28 +438,6 @@ export default function FavoritesPage() {
       void supabase.removeChannel(ch);
     };
   }, [session?.user.id, loadFavorites]);
-
-  const favoriteShelves = useMemo<FavoriteShelf[]>(() => {
-    const grouped = new Map<string, FavoriteBook[]>();
-    for (const entry of favorites) {
-      const names =
-        entry.categories.length > 0 ? entry.categories : ["Uncategorized"];
-      for (const name of names) {
-        grouped.set(name, [...(grouped.get(name) ?? []), entry]);
-      }
-    }
-    return Array.from(grouped.entries())
-      .map(([name, items]) => ({
-        name,
-        items: [...items].sort((l, r) =>
-          l.book.title.localeCompare(r.book.title),
-        ),
-      }))
-      .sort(
-        (l, r) =>
-          r.items.length - l.items.length || l.name.localeCompare(r.name),
-      );
-  }, [favorites]);
 
   const reservedFavoritesCount = useMemo(
     () => favorites.filter((e) => reservedBookIds.has(e.book.id)).length,
@@ -637,7 +570,7 @@ export default function FavoritesPage() {
       }}
       sidebarStats={[
         { label: "Favorites", value: String(favorites.length) },
-        { label: "Shelves", value: String(favoriteShelves.length) },
+        { label: "Ready", value: String(readyToReserveCount) },
       ]}
       sidebarAction={{
         label: isFetching ? "Refreshing…" : "Refresh Data",
@@ -690,11 +623,6 @@ export default function FavoritesPage() {
               desc: "Titles bookmarked for quicker return visits.",
             },
             {
-              label: "Category Shelves",
-              value: favoriteShelves.length,
-              desc: "Grouped by catalog category for easy scanning.",
-            },
-            {
               label: "Ready To Reserve",
               value: readyToReserveCount,
               desc: "Available copies with no active reservation yet.",
@@ -724,10 +652,10 @@ export default function FavoritesPage() {
           <div className="mb-5 flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-emerald-700">
-                Favorite Shelves
+                Favorite Books
               </p>
               <h2 className="mt-2 text-xl font-semibold tracking-tight text-slate-900">
-                Favorites grouped by category
+                Your saved titles
               </h2>
               <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500">
                 Your personal curated collection of resources and saved library
@@ -735,7 +663,7 @@ export default function FavoritesPage() {
               </p>
             </div>
             <p className="text-sm font-medium text-slate-500">
-              {favoriteShelves.length} active shelves
+              {favorites.length} saved {favorites.length === 1 ? "book" : "books"}
             </p>
           </div>
 
@@ -751,70 +679,29 @@ export default function FavoritesPage() {
                 </div>
               ))}
             </div>
-          ) : favoriteShelves.length === 0 ? (
+          ) : favorites.length === 0 ? (
             <div className="rounded-[1.6rem] border border-dashed border-slate-200 bg-slate-50 px-5 py-10 text-center text-sm text-slate-500">
               No favorite books yet. Save titles from Discover to build your
-              shelves.
+              reading list.
             </div>
           ) : (
-            <div className="space-y-5">
-              {favoriteShelves.map((shelf) => {
-                const shelfReservedCount = shelf.items.filter((e) =>
-                  reservedBookIds.has(e.book.id),
-                ).length;
-                return (
-                  <article
-                    key={shelf.name}
-                    className="rounded-[1.5rem] bg-slate-50/70 p-4"
-                  >
-                    <div className="mb-4 flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
-                      <div>
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                          Catalog Category
-                        </p>
-                        <h3 className="mt-1 text-lg font-semibold tracking-tight text-slate-900">
-                          {shelf.name}
-                        </h3>
-                        <p className="mt-1 text-sm text-slate-500">
-                          {shelf.items.length} saved{" "}
-                          {shelf.items.length === 1 ? "book" : "books"} in this
-                          shelf.
-                        </p>
-                      </div>
-                      <div className="flex flex-wrap gap-2 text-xs font-medium text-slate-500">
-                        <span className="rounded-full bg-white px-3 py-1.5">
-                          {shelfReservedCount} reserved
-                        </span>
-                        <span className="rounded-full bg-white px-3 py-1.5">
-                          {shelf.items.length - shelfReservedCount} unreserved
-                        </span>
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-                      {shelf.items.map((entry) => (
-                        <FavoriteBookCard
-                          key={`${shelf.name}-${entry.book.id}`}
-                          activeAction={activeAction}
-                          entry={entry}
-                          isReserved={reservedBookIds.has(entry.book.id)}
-                          isSavingReserve={
-                            activeReserveBookId === entry.book.id
-                          }
-                          onOpenDetails={() =>
-                            navigate(`/books/${entry.book.id}`)
-                          }
-                          onReserve={() => {
-                            void handleReserveBook(entry.book.id);
-                          }}
-                          onRemove={() => {
-                            void handleRemoveFavorite(entry.book.id);
-                          }}
-                        />
-                      ))}
-                    </div>
-                  </article>
-                );
-              })}
+            <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+              {favorites.map((entry) => (
+                <FavoriteBookCard
+                  key={entry.book.id}
+                  activeAction={activeAction}
+                  entry={entry}
+                  isReserved={reservedBookIds.has(entry.book.id)}
+                  isSavingReserve={activeReserveBookId === entry.book.id}
+                  onOpenDetails={() => navigate(`/books/${entry.book.id}`)}
+                  onReserve={() => {
+                    void handleReserveBook(entry.book.id);
+                  }}
+                  onRemove={() => {
+                    void handleRemoveFavorite(entry.book.id);
+                  }}
+                />
+              ))}
             </div>
           )}
         </section>
